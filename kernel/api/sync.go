@@ -40,7 +40,41 @@ func getBootSync(c *gin.Context) {
 func performSync(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
-	model.SyncData(false, false, true)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	// Android 端前后台切换时自动触发同步 https://github.com/siyuan-note/siyuan/issues/7122
+	var mobileSwitch bool
+	if mobileSwitchArg := arg["mobileSwitch"]; nil != mobileSwitchArg {
+		mobileSwitch = mobileSwitchArg.(bool)
+	}
+	if mobileSwitch {
+		if nil == model.Conf.User || !model.Conf.Sync.Enabled {
+			return
+		}
+	}
+
+	if 3 != model.Conf.Sync.Mode {
+		model.SyncData(false, false, true)
+		return
+	}
+
+	// 云端同步模式支持 `完全手动同步` 模式 https://github.com/siyuan-note/siyuan/issues/7295
+	uploadArg := arg["upload"]
+	if nil == uploadArg {
+		// 必须传入同步方向，未传的话不执行同步
+		return
+	}
+
+	upload := uploadArg.(bool)
+	if upload {
+		model.SyncDataUpload()
+	} else {
+		model.SyncDataDownload()
+	}
 }
 
 func performBootSync(c *gin.Context) {
@@ -132,13 +166,7 @@ func setSyncEnable(c *gin.Context) {
 	}
 
 	enabled := arg["enabled"].(bool)
-	err := model.SetSyncEnable(enabled)
-	if nil != err {
-		ret.Code = 1
-		ret.Msg = err.Error()
-		ret.Data = map[string]interface{}{"closeTimeout": 5000}
-		return
-	}
+	model.SetSyncEnable(enabled)
 }
 
 func setSyncMode(c *gin.Context) {

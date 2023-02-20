@@ -20,8 +20,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/imroc/req/v3"
-	"github.com/siyuan-note/httpclient"
 	"net/http"
 	"net/url"
 	"os"
@@ -44,7 +42,9 @@ import (
 	"github.com/88250/pdfcpu/pkg/pdfcpu"
 	"github.com/emirpasic/gods/sets/hashset"
 	"github.com/emirpasic/gods/stacks/linkedliststack"
+	"github.com/imroc/req/v3"
 	"github.com/siyuan-note/filelock"
+	"github.com/siyuan-note/httpclient"
 	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/sql"
 	"github.com/siyuan-note/siyuan/kernel/treenode"
@@ -704,17 +704,6 @@ func AddPDFOutline(id, p string, merge bool) (err error) {
 		}
 	}
 
-	//if 4 == Conf.Export.BlockRefMode { // 块引转脚注
-	//	var footnotesBms []*pdfcpu.Bookmark
-	//	for _, bm := range footnotes {
-	//		footnotesBms = append(footnotesBms, bm)
-	//	}
-	//	sort.Slice(footnotesBms, func(i, j int) bool { return footnotesBms[i].PageFrom < footnotesBms[j].PageFrom })
-	//	for _, bm := range footnotesBms {
-	//		topBms = append(topBms, bm)
-	//	}
-	//}
-
 	outFile := inFile + ".tmp"
 	err = api.AddBookmarksFile(inFile, outFile, topBms, nil)
 	if nil != err {
@@ -1373,7 +1362,7 @@ func exportTree(tree *parse.Tree, wysiwyg, expandKaTexMacros, keepFold bool,
 			if n.IsTextMarkType("inline-math") {
 				n.TextMarkInlineMathContent = strings.TrimSpace(n.TextMarkInlineMathContent)
 				return ast.WalkContinue
-			} else if n.IsTextMarkType("file-annotation-ref") {
+			} else if treenode.IsFileAnnotationRef(n) {
 				refID := n.TextMarkFileAnnotationRefID
 				status := processFileAnnotationRef(refID, n, fileAnnotationRefMode)
 				unlinks = append(unlinks, n)
@@ -1443,7 +1432,7 @@ func exportTree(tree *parse.Tree, wysiwyg, expandKaTexMacros, keepFold bool,
 	}
 
 	if addTitle {
-		if root, _ := getBlock(id); nil != root {
+		if root, _ := getBlock(id, tree); nil != root {
 			title := &ast.Node{Type: ast.NodeHeading, HeadingLevel: 1, KramdownIAL: parse.Map2IAL(root.IAL)}
 			content := html.UnescapeString(root.Content)
 			title.AppendChild(&ast.Node{Type: ast.NodeText, Tokens: []byte(content)})

@@ -103,6 +103,8 @@ export const selectAll = (protyle: IProtyle, nodeElement: Element, range: Range)
                         lastChild = lastChild.lastChild as HTMLElement;
                     }
                 }
+                // 列表回车后，左键全选无法选中
+                focusByRange(range);
                 protyle.toolbar.render(protyle, range);
                 countSelectWord(range, protyle.block.rootID);
                 return true;
@@ -196,10 +198,14 @@ export const getSelectionPosition = (nodeElement: Element, range?: Range) => {
                 if (!parentElement) {
                     parentElement = range.startContainer.childNodes[range.startOffset - 1] as HTMLElement;
                 }
-                while (!parentElement.getClientRects || (parentElement.getClientRects && parentElement.getClientRects().length === 0)) {
-                    parentElement = parentElement.parentElement;
+                if (!parentElement) {
+                    cursorRect = range.getBoundingClientRect();
+                } else {
+                    while (!parentElement.getClientRects || (parentElement.getClientRects && parentElement.getClientRects().length === 0)) {
+                        parentElement = parentElement.parentElement;
+                    }
+                    cursorRect = parentElement.getClientRects()[0];
                 }
-                cursorRect = parentElement.getClientRects()[0];
             }
         }
     } else {
@@ -213,7 +219,7 @@ export const getSelectionPosition = (nodeElement: Element, range?: Range) => {
     };
 };
 
-export const getSelectionOffset = (selectElement: Element, editorElement?: Element, range?: Range) => {
+export const getSelectionOffset = (selectElement: Node, editorElement?: Element, range?: Range) => {
     const position = {
         end: 0,
         start: 0,

@@ -20,10 +20,14 @@ import (
 	"bytes"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -33,6 +37,7 @@ import (
 	"github.com/88250/lute/parse"
 	"github.com/mattn/go-sqlite3"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/siyuan-note/eventbus"
 	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/treenode"
 	"github.com/siyuan-note/siyuan/kernel/util"
@@ -56,16 +61,20 @@ func init() {
 	})
 }
 
+var initDatabaseLock = sync.Mutex{}
+
 func InitDatabase(forceRebuild bool) (err error) {
+	initDatabaseLock.Lock()
+	defer initDatabaseLock.Unlock()
+
 	ClearBlockCache()
-	DisableCache()
-	defer EnableCache()
+	disableCache()
+	defer enableCache()
 
 	util.IncBootProgress(2, "Initializing database...")
 
 	if forceRebuild {
 		ClearQueue()
-		WaitForWritingDatabase()
 	}
 
 	initDBConnection()
@@ -80,12 +89,12 @@ func InitDatabase(forceRebuild bool) (err error) {
 
 	// 不存在库或者版本不一致都会走到这里
 
-	db.Close()
+	closeDatabase()
 	if gulu.File.IsExist(util.DBPath) {
 		if err = removeDatabaseFile(); nil != err {
 			logging.LogErrorf("remove database file [%s] failed: %s", util.DBPath, err)
 			util.PushClearProgress()
-			return
+			err = nil
 		}
 	}
 	if gulu.File.IsExist(util.BlockTreePath) {
@@ -100,56 +109,83 @@ func InitDatabase(forceRebuild bool) (err error) {
 }
 
 func initDBTables() {
-	db.Exec("DROP TABLE stat")
-	_, err := db.Exec("CREATE TABLE stat (key, value)")
+	_, err := db.Exec("DROP TABLE IF EXISTS stat")
+	if nil != err {
+		logging.LogFatalf("drop table [stat] failed: %s", err)
+	}
+	_, err = db.Exec("CREATE TABLE stat (key, value)")
 	if nil != err {
 		logging.LogFatalf("create table [stat] failed: %s", err)
 	}
 	setDatabaseVer()
 
-	db.Exec("DROP TABLE blocks")
+	_, err = db.Exec("DROP TABLE IF EXISTS blocks")
+	if nil != err {
+		logging.LogFatalf("drop table [blocks] failed: %s", err)
+	}
 	_, err = db.Exec("CREATE TABLE blocks (id, parent_id, root_id, hash, box, path, hpath, name, alias, memo, tag, content, fcontent, markdown, length, type, subtype, ial, sort, created, updated)")
 	if nil != err {
 		logging.LogFatalf("create table [blocks] failed: %s", err)
 	}
 
-	db.Exec("DROP TABLE blocks_fts")
+	_, err = db.Exec("DROP TABLE IF EXISTS blocks_fts")
+	if nil != err {
+		logging.LogFatalf("drop table [blocks_fts] failed: %s", err)
+	}
 	_, err = db.Exec("CREATE VIRTUAL TABLE blocks_fts USING fts5(id UNINDEXED, parent_id UNINDEXED, root_id UNINDEXED, hash UNINDEXED, box UNINDEXED, path UNINDEXED, hpath, name, alias, memo, tag, content, fcontent, markdown UNINDEXED, length UNINDEXED, type UNINDEXED, subtype UNINDEXED, ial, sort UNINDEXED, created UNINDEXED, updated UNINDEXED, tokenize=\"siyuan\")")
 	if nil != err {
 		logging.LogFatalf("create table [blocks_fts] failed: %s", err)
 	}
 
-	db.Exec("DROP TABLE blocks_fts_case_insensitive")
+	_, err = db.Exec("DROP TABLE IF EXISTS blocks_fts_case_insensitive")
+	if nil != err {
+		logging.LogFatalf("drop table [blocks_fts_case_insensitive] failed: %s", err)
+	}
 	_, err = db.Exec("CREATE VIRTUAL TABLE blocks_fts_case_insensitive USING fts5(id UNINDEXED, parent_id UNINDEXED, root_id UNINDEXED, hash UNINDEXED, box UNINDEXED, path UNINDEXED, hpath, name, alias, memo, tag, content, fcontent, markdown UNINDEXED, length UNINDEXED, type UNINDEXED, subtype UNINDEXED, ial, sort UNINDEXED, created UNINDEXED, updated UNINDEXED, tokenize=\"siyuan case_insensitive\")")
 	if nil != err {
 		logging.LogFatalf("create table [blocks_fts_case_insensitive] failed: %s", err)
 	}
 
-	db.Exec("DROP TABLE spans")
+	_, err = db.Exec("DROP TABLE IF EXISTS spans")
+	if nil != err {
+		logging.LogFatalf("drop table [spans] failed: %s", err)
+	}
 	_, err = db.Exec("CREATE TABLE spans (id, block_id, root_id, box, path, content, markdown, type, ial)")
 	if nil != err {
 		logging.LogFatalf("create table [spans] failed: %s", err)
 	}
 
-	db.Exec("DROP TABLE assets")
+	_, err = db.Exec("DROP TABLE IF EXISTS assets")
+	if nil != err {
+		logging.LogFatalf("drop table [assets] failed: %s", err)
+	}
 	_, err = db.Exec("CREATE TABLE assets (id, block_id, root_id, box, docpath, path, name, title, hash)")
 	if nil != err {
 		logging.LogFatalf("create table [assets] failed: %s", err)
 	}
 
-	db.Exec("DROP TABLE attributes")
+	_, err = db.Exec("DROP TABLE IF EXISTS attributes")
+	if nil != err {
+		logging.LogFatalf("drop table [attributes] failed: %s", err)
+	}
 	_, err = db.Exec("CREATE TABLE attributes (id, name, value, type, block_id, root_id, box, path)")
 	if nil != err {
 		logging.LogFatalf("create table [attributes] failed: %s", err)
 	}
 
-	db.Exec("DROP TABLE refs")
+	_, err = db.Exec("DROP TABLE IF EXISTS refs")
+	if nil != err {
+		logging.LogFatalf("drop table [refs] failed: %s", err)
+	}
 	_, err = db.Exec("CREATE TABLE refs (id, def_block_id, def_block_parent_id, def_block_root_id, def_block_path, block_id, root_id, box, path, content, markdown, type)")
 	if nil != err {
 		logging.LogFatalf("create table [refs] failed: %s", err)
 	}
 
-	db.Exec("DROP TABLE file_annotation_refs")
+	_, err = db.Exec("DROP TABLE IF EXISTS file_annotation_refs")
+	if nil != err {
+		logging.LogFatalf("drop table [refs] failed: %s", err)
+	}
 	_, err = db.Exec("CREATE TABLE file_annotation_refs (id, file_path, annotation_id, block_id, root_id, box, path, content, type)")
 	if nil != err {
 		logging.LogFatalf("create table [refs] failed: %s", err)
@@ -180,9 +216,10 @@ func initHistoryDBConnection() {
 
 	dsn := util.HistoryDBPath + "?_journal_mode=OFF" +
 		"&_synchronous=OFF" +
+		"&_mmap_size=2684354560" +
 		"&_secure_delete=OFF" +
 		"&_cache_size=-20480" +
-		"&_page_size=8192" +
+		"&_page_size=32768" +
 		"&_busy_timeout=7000" +
 		"&_ignore_check_constraints=ON" +
 		"&_temp_store=MEMORY" +
@@ -206,43 +243,16 @@ func initHistoryDBTables() {
 	}
 }
 
-func IndexMode() {
-	if nil != db {
-		db.Close()
-	}
-	dsn := util.DBPath + "?_journal_mode=OFF" +
-		"&_synchronous=OFF" +
-		"&_secure_delete=OFF" +
-		"&_cache_size=-20480" +
-		"&_page_size=8192" +
-		"&_busy_timeout=7000" +
-		"&_ignore_check_constraints=ON" +
-		"&_temp_store=MEMORY" +
-		"&_case_sensitive_like=OFF" +
-		"&_locking_mode=EXCLUSIVE"
-	var err error
-	db, err = sql.Open("sqlite3_extended", dsn)
-	if nil != err {
-		logging.LogFatalf("create database failed: %s", err)
-	}
-	db.SetMaxIdleConns(1)
-	db.SetMaxOpenConns(1)
-	db.SetConnMaxLifetime(365 * 24 * time.Hour)
-}
-
-func NormalMode() {
-	initDBConnection()
-}
-
 func initDBConnection() {
 	if nil != db {
-		db.Close()
+		closeDatabase()
 	}
 	dsn := util.DBPath + "?_journal_mode=WAL" +
 		"&_synchronous=OFF" +
+		"&_mmap_size=2684354560" +
 		"&_secure_delete=OFF" +
 		"&_cache_size=-20480" +
-		"&_page_size=8192" +
+		"&_page_size=32768" +
 		"&_busy_timeout=7000" +
 		"&_ignore_check_constraints=ON" +
 		"&_temp_store=MEMORY" +
@@ -277,7 +287,7 @@ func refsFromTree(tree *parse.Tree) (refs []*Ref, fileAnnotationRefs []*FileAnno
 		if treenode.IsBlockRef(n) {
 			ref := buildRef(tree, n)
 			refs = append(refs, ref)
-		} else if ast.NodeTextMark == n.Type && n.IsTextMarkType("file-annotation-ref") {
+		} else if treenode.IsFileAnnotationRef(n) {
 			pathID := n.TextMarkFileAnnotationRefID
 			idx := strings.LastIndex(pathID, "/")
 			if -1 == idx {
@@ -305,6 +315,9 @@ func refsFromTree(tree *parse.Tree) (refs []*Ref, fileAnnotationRefs []*FileAnno
 				Type:         treenode.TypeAbbr(n.Type.String()),
 			}
 			fileAnnotationRefs = append(fileAnnotationRefs, ref)
+		} else if treenode.IsEmbedBlockRef(n) {
+			ref := buildEmbedRef(tree, n)
+			refs = append(refs, ref)
 		}
 		return ast.WalkContinue
 	})
@@ -336,6 +349,37 @@ func buildRef(tree *parse.Tree, refNode *ast.Node) *Ref {
 		Markdown:         markdown,
 		Type:             treenode.TypeAbbr(refNode.Type.String()),
 	}
+}
+
+func buildEmbedRef(tree *parse.Tree, embedNode *ast.Node) *Ref {
+	defBlockID := getEmbedRef(embedNode)
+	var defBlockParentID, defBlockRootID, defBlockPath string
+	defBlock := treenode.GetBlockTree(defBlockID)
+	if nil != defBlock {
+		defBlockParentID = defBlock.ParentID
+		defBlockRootID = defBlock.RootID
+		defBlockPath = defBlock.Path
+	}
+
+	return &Ref{
+		ID:               ast.NewNodeID(),
+		DefBlockID:       defBlockID,
+		DefBlockParentID: defBlockParentID,
+		DefBlockRootID:   defBlockRootID,
+		DefBlockPath:     defBlockPath,
+		BlockID:          embedNode.ID,
+		RootID:           tree.ID,
+		Box:              tree.Box,
+		Path:             tree.Path,
+		Content:          "", // 通过嵌入块构建引用时定义块可能还没有入库，所以这里统一不填充内容
+		Markdown:         "",
+		Type:             treenode.TypeAbbr(embedNode.Type.String()),
+	}
+}
+
+func getEmbedRef(embedNode *ast.Node) (queryBlockID string) {
+	queryBlockID = treenode.GetEmbedBlockRef(embedNode)
+	return
 }
 
 func fromTree(node *ast.Node, tree *parse.Tree) (blocks []*Block, spans []*Span, assets []*Asset, attributes []*Attribute) {
@@ -779,7 +823,7 @@ func DeleteBlockByIDs(tx *sql.Tx, ids []string) (err error) {
 	return deleteBlocksByIDs(tx, ids)
 }
 
-func DeleteByBoxTx(tx *sql.Tx, box string) (err error) {
+func deleteByBoxTx(tx *sql.Tx, box string) (err error) {
 	if err = deleteBlocksByBoxTx(tx, box); nil != err {
 		return
 	}
@@ -792,7 +836,7 @@ func DeleteByBoxTx(tx *sql.Tx, box string) (err error) {
 	if err = deleteAttributesByBoxTx(tx, box); nil != err {
 		return
 	}
-	if err = deleteRefsByBoxTx(tx, box); nil != err {
+	if err = deleteBlockRefsByBoxTx(tx, box); nil != err {
 		return
 	}
 	if err = deleteFileAnnotationRefsByBoxTx(tx, box); nil != err {
@@ -908,14 +952,14 @@ func deleteRefsByPathTx(tx *sql.Tx, box, path string) (err error) {
 	return
 }
 
-func DeleteRefsByBoxTx(tx *sql.Tx, box string) (err error) {
+func deleteRefsByBoxTx(tx *sql.Tx, box string) (err error) {
 	if err = deleteFileAnnotationRefsByBoxTx(tx, box); nil != err {
 		return
 	}
-	return deleteRefsByBoxTx(tx, box)
+	return deleteBlockRefsByBoxTx(tx, box)
 }
 
-func deleteRefsByBoxTx(tx *sql.Tx, box string) (err error) {
+func deleteBlockRefsByBoxTx(tx *sql.Tx, box string) (err error) {
 	stmt := "DELETE FROM refs WHERE box = ?"
 	err = execStmtTx(tx, stmt, box)
 	return
@@ -939,8 +983,16 @@ func deleteFileAnnotationRefsByBoxTx(tx *sql.Tx, box string) (err error) {
 	return
 }
 
-func DeleteByRootID(tx *sql.Tx, rootID string) (err error) {
+func deleteByRootID(tx *sql.Tx, rootID string, context map[string]interface{}) (err error) {
 	stmt := "DELETE FROM blocks WHERE root_id = ?"
+	if err = execStmtTx(tx, stmt, rootID); nil != err {
+		return
+	}
+	stmt = "DELETE FROM blocks_fts WHERE root_id = ?"
+	if err = execStmtTx(tx, stmt, rootID); nil != err {
+		return
+	}
+	stmt = "DELETE FROM blocks_fts_case_insensitive WHERE root_id = ?"
 	if err = execStmtTx(tx, stmt, rootID); nil != err {
 		return
 	}
@@ -961,6 +1013,43 @@ func DeleteByRootID(tx *sql.Tx, rootID string) (err error) {
 		return
 	}
 	ClearBlockCache()
+	eventbus.Publish(eventbus.EvtSQLDeleteBlocks, context, rootID)
+	return
+}
+
+func batchDeleteByRootIDs(tx *sql.Tx, rootIDs []string, context map[string]interface{}) (err error) {
+	ids := strings.Join(rootIDs, "','")
+	ids = "('" + ids + "')"
+	stmt := "DELETE FROM blocks WHERE root_id IN " + ids
+	if err = execStmtTx(tx, stmt); nil != err {
+		return
+	}
+	stmt = "DELETE FROM blocks_fts WHERE root_id IN " + ids
+	if err = execStmtTx(tx, stmt); nil != err {
+		return
+	}
+	stmt = "DELETE FROM blocks_fts_case_insensitive WHERE root_id IN " + ids
+	if err = execStmtTx(tx, stmt); nil != err {
+		return
+	}
+	stmt = "DELETE FROM spans WHERE root_id IN " + ids
+	if err = execStmtTx(tx, stmt); nil != err {
+		return
+	}
+	stmt = "DELETE FROM assets WHERE root_id IN " + ids
+	if err = execStmtTx(tx, stmt); nil != err {
+		return
+	}
+	stmt = "DELETE FROM refs WHERE root_id IN " + ids
+	if err = execStmtTx(tx, stmt); nil != err {
+		return
+	}
+	stmt = "DELETE FROM file_annotation_refs WHERE root_id IN " + ids
+	if err = execStmtTx(tx, stmt); nil != err {
+		return
+	}
+	ClearBlockCache()
+	eventbus.Publish(eventbus.EvtSQLDeleteBlocks, context, fmt.Sprintf("%d", len(rootIDs)))
 	return
 }
 
@@ -1015,7 +1104,7 @@ func batchUpdateHPath(tx *sql.Tx, boxID, rootID, oldHPath, newHPath string) (err
 }
 
 func CloseDatabase() {
-	if err := db.Close(); nil != err {
+	if err := closeDatabase(); nil != err {
 		logging.LogErrorf("close database failed: %s", err)
 		return
 	}
@@ -1043,7 +1132,7 @@ func query(query string, args ...interface{}) (*sql.Rows, error) {
 	return db.Query(query, args...)
 }
 
-func BeginTx() (tx *sql.Tx, err error) {
+func beginTx() (tx *sql.Tx, err error) {
 	if tx, err = db.Begin(); nil != err {
 		logging.LogErrorf("begin tx failed: %s\n  %s", err, logging.ShortStack())
 		if strings.Contains(err.Error(), "database is locked") {
@@ -1063,7 +1152,7 @@ func BeginHistoryTx() (tx *sql.Tx, err error) {
 	return
 }
 
-func CommitTx(tx *sql.Tx) (err error) {
+func CommitHistoryTx(tx *sql.Tx) (err error) {
 	if nil == tx {
 		logging.LogErrorf("tx is nil")
 		return errors.New("tx is nil")
@@ -1075,10 +1164,16 @@ func CommitTx(tx *sql.Tx) (err error) {
 	return
 }
 
-func RollbackTx(tx *sql.Tx) {
-	if err := tx.Rollback(); nil != err {
-		logging.LogErrorf("rollback tx failed: %s\n  %s", err, logging.ShortStack())
+func commitTx(tx *sql.Tx) (err error) {
+	if nil == tx {
+		logging.LogErrorf("tx is nil")
+		return errors.New("tx is nil")
 	}
+
+	if err = tx.Commit(); nil != err {
+		logging.LogErrorf("commit tx failed: %s\n  %s", err, logging.ShortStack())
+	}
+	return
 }
 
 func prepareExecInsertTx(tx *sql.Tx, stmtSQL string, args []interface{}) (err error) {
@@ -1097,7 +1192,7 @@ func execStmtTx(tx *sql.Tx, stmt string, args ...interface{}) (err error) {
 	if _, err = tx.Exec(stmt, args...); nil != err {
 		if strings.Contains(err.Error(), "database disk image is malformed") {
 			tx.Rollback()
-			db.Close()
+			closeDatabase()
 			removeDatabaseFile()
 			logging.LogFatalf("database disk image [%s] is malformed, please restart SiYuan kernel to rebuild it", util.DBPath)
 		}
@@ -1164,5 +1259,16 @@ func removeDatabaseFile() (err error) {
 	if nil != err {
 		return
 	}
+	return
+}
+
+func closeDatabase() (err error) {
+	if nil == db {
+		return
+	}
+
+	err = db.Close()
+	debug.FreeOSMemory()
+	runtime.GC() // 没有这句的话文件句柄不会释放，后面就无法删除文件
 	return
 }

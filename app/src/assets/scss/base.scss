@@ -29,16 +29,18 @@
 @import "viewer";
 
 /*
-.status: 2
-
-// 需小于 .block__popover https://github.com/siyuan-note/siyuan/issues/3515
-ctrl+p 搜索: 199
+.status: 3
 
 // 需小于 .block__popover
-.protyle-util: 200
+// 需小于 ctrl+p https://github.com/siyuan-note/siyuan/issues/7174
+.protyle-util: 4
 
 // 引用提示需小于 .block__popover
 .protyle-hint: 201
+
+// 需小于 .block__popover https://github.com/siyuan-note/siyuan/issues/3515
+// 需大于 .protyle-hint https://github.com/siyuan-note/siyuan/pull/7247
+ctrl+p 搜索: 202
 
 // 需小于 .b3-menu 悬浮窗点击更多
 // 需小于 .b3-dialog https://ld246.com/article/1637204682648
@@ -47,6 +49,9 @@ ctrl+p 搜索: 199
 
 // 需大于 .block__popover
 .b3-menu: 210
+
+// 需小于 .side-panel
+#transactionTip & #keyboardToolbar: 212
 
 // 需小于 .b3-dialog 关于中的锁屏密码设置
 .side-panel: 220
@@ -133,6 +138,7 @@ progressLoading: 400
 
 .pcr-app {
   box-shadow: var(--b3-dialog-shadow);
+  border: 1px solid var(--b3-theme-surface-lighter);
   border-radius: 4px;
 
   .pcr-interaction .pcr-result {
@@ -144,7 +150,7 @@ progressLoading: 400
   .pcr-selection .pcr-picker {
     height: 16px;
     width: 16px;
-    border: 0;
+    border: 1px solid var(--b3-theme-surface-lighter);
     box-shadow: var(--b3-point-shadow);
     transition: transform 100ms ease-out;
   }
@@ -179,18 +185,6 @@ progressLoading: 400
 
   &--browser {
     padding-left: 0;
-  }
-
-  #windowAppIcon {
-    -webkit-app-region: drag;
-    width: 42px;
-    margin-left: 1px;
-    justify-content: center;
-    color: #fff;
-
-    &:hover {
-      color: var(--b3-theme-on-background);
-    }
   }
 
   #windowControls {
@@ -229,8 +223,7 @@ progressLoading: 400
 
     &:not(.toolbar__item--disabled):not(.toolbar__item--close):hover,
     &--active {
-      color: var(--b3-theme-on-background);
-      background-color: var(--b3-theme-background-light);
+      background-color: var(--b3-toolbar-hover);
     }
 
     svg {
@@ -242,6 +235,7 @@ progressLoading: 400
       width: 8px;
       height: 13.5px;
       margin-left: 4px;
+      opacity: .54;
     }
 
     &--disabled {
@@ -263,6 +257,23 @@ progressLoading: 400
     }
   }
 
+  &__window {
+    position: fixed;
+    top: 0;
+    right: 0;
+    display: flex;
+    z-index: 502;
+
+    .toolbar__item {
+      padding: 14.25px;
+
+      &:not(.toolbar__item--disabled):not(.toolbar__item--close):hover,
+      &--active {
+        background-color: var(--b3-theme-background-light);
+      }
+    }
+  }
+
   &__text {
     font-size: 12px;
     max-width: 96px;
@@ -270,13 +281,14 @@ progressLoading: 400
     text-overflow: ellipsis;
     white-space: nowrap;
     user-select: none;
+    color: #ebecf0;
   }
 }
 
 .status {
   background-color: var(--b3-theme-surface);
   box-sizing: border-box;
-  z-index: 2;
+  z-index: 3;
   height: 32px;
   line-height: 32px;
   border-top: .5px solid var(--b3-border-color);
@@ -284,6 +296,11 @@ progressLoading: 400
 
   .toolbar__item {
     color: var(--b3-theme-on-surface);
+
+    &:hover {
+      color: var(--b3-theme-on-background);
+      background-color: var(--b3-theme-background-light) !important;
+    }
   }
 
   &__msg {
@@ -299,6 +316,31 @@ progressLoading: 400
     display: flex;
     flex-shrink: 0;
     font-size: 12px;
+  }
+
+  &__backgroundtask {
+    display: flex;
+    color: var(--b3-theme-on-surface);
+    font-size: 12px;
+
+    & > div {
+      height: 4px;
+      border-radius: 4px;
+      overflow: hidden;
+      background-color: #fff;
+      width: 64px;
+      align-self: center;
+      margin: 0 8px 0 4px;
+      cursor: pointer;
+
+      & > div {
+        background-color: var(--b3-theme-primary-light);
+        height: 4px;
+        background-image: linear-gradient(-45deg, rgba(255, 255, 255, 0.2) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.2) 50%, rgba(255, 255, 255, 0.2) 75%, transparent 75%, transparent);
+        animation: stripMove 450ms linear infinite;
+        background-size: 50px 50px;
+      }
+    }
   }
 
   #barDock .b3-menu__item:hover {
@@ -327,7 +369,9 @@ progressLoading: 400
 
     label {
       width: 16%;
-      margin-right: 17%;
+      margin: 8px 17% 0 0;
+      color: var(--b3-theme-on-surface);
+      align-items: center;
     }
   }
 
@@ -402,6 +446,7 @@ progressLoading: 400
       border-radius: 90px;
       background-color: rgba(255, 255, 255, 0.8);
       box-shadow: var(--b3-point-shadow);
+      border: 1px solid var(--b3-theme-surface-lighter);
     }
 
     &__name {

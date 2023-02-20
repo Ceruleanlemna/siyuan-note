@@ -9,6 +9,10 @@ import {unicode2Emoji} from "../emoji";
 import {fetchPost} from "../util/fetch";
 import {showTooltip} from "../dialog/tooltip";
 import {isTouchDevice} from "../util/functions";
+/// #if !BROWSER
+import {openNewWindow} from "../window/openNewWindow";
+/// #endif
+import {layoutToJSON} from "./util";
 
 export class Tab {
     public parent: Wnd;
@@ -76,6 +80,9 @@ export class Tab {
                 if (tabElement) {
                     event.dataTransfer.setData("text/html", tabElement.outerHTML);
                     event.dataTransfer.setData(Constants.SIYUAN_DROP_TAB, this.id);
+                    const modeJSON = {};
+                    layoutToJSON(this, modeJSON);
+                    event.dataTransfer.setData(Constants.SIYUAN_DROP_TABTOWINDOW, JSON.stringify(modeJSON));
                     event.dataTransfer.dropEffect = "move";
                     tabElement.style.opacity = "0.1";
                     window.siyuan.dragElement = this.headElement;
@@ -89,6 +96,15 @@ export class Tab {
                         item.remove();
                     });
                 }
+                /// #if !BROWSER
+                // 拖拽到屏幕外
+                setTimeout(() => {
+                    if (document.body.contains(this.panelElement) &&
+                        (event.clientX < 0 || event.clientY < 0 || event.clientX > window.innerWidth || event.clientY > window.innerHeight)) {
+                        openNewWindow(this);
+                    }
+                }, Constants.TIMEOUT_BLOCKLOAD); // 等待主进程发送关闭消息
+                /// #endif
                 window.siyuan.dragElement = undefined;
                 if (event.dataTransfer.dropEffect === "none") {
                     // 按 esc 取消的时候应该还原在 dragover 时交换的 tab

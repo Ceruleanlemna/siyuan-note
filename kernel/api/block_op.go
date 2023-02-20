@@ -22,9 +22,10 @@ import (
 	"github.com/88250/gulu"
 	"github.com/88250/lute"
 	"github.com/88250/lute/ast"
-	"github.com/88250/lute/parse"
 	"github.com/gin-gonic/gin"
+	"github.com/siyuan-note/siyuan/kernel/filesys"
 	"github.com/siyuan-note/siyuan/kernel/model"
+	"github.com/siyuan-note/siyuan/kernel/treenode"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
@@ -40,8 +41,11 @@ func appendBlock(c *gin.Context) {
 	data := arg["data"].(string)
 	dataType := arg["dataType"].(string)
 	parentID := arg["parentID"].(string)
+	if util.InvalidIDPattern(parentID, ret) {
+		return
+	}
 	if "markdown" == dataType {
-		luteEngine := model.NewLute()
+		luteEngine := util.NewLute()
 		data = dataBlockDOM(data, luteEngine)
 	}
 
@@ -82,8 +86,11 @@ func prependBlock(c *gin.Context) {
 	data := arg["data"].(string)
 	dataType := arg["dataType"].(string)
 	parentID := arg["parentID"].(string)
+	if util.InvalidIDPattern(parentID, ret) {
+		return
+	}
 	if "markdown" == dataType {
-		luteEngine := model.NewLute()
+		luteEngine := util.NewLute()
 		data = dataBlockDOM(data, luteEngine)
 	}
 
@@ -126,16 +133,25 @@ func insertBlock(c *gin.Context) {
 	var parentID, previousID, nextID string
 	if nil != arg["parentID"] {
 		parentID = arg["parentID"].(string)
+		if util.InvalidIDPattern(parentID, ret) {
+			return
+		}
 	}
 	if nil != arg["previousID"] {
 		previousID = arg["previousID"].(string)
+		if util.InvalidIDPattern(previousID, ret) {
+			return
+		}
 	}
 	if nil != arg["nextID"] {
 		nextID = arg["nextID"].(string)
+		if util.InvalidIDPattern(nextID, ret) {
+			return
+		}
 	}
 
 	if "markdown" == dataType {
-		luteEngine := model.NewLute()
+		luteEngine := util.NewLute()
 		data = dataBlockDOM(data, luteEngine)
 	}
 
@@ -178,8 +194,11 @@ func updateBlock(c *gin.Context) {
 	data := arg["data"].(string)
 	dataType := arg["dataType"].(string)
 	id := arg["id"].(string)
+	if util.InvalidIDPattern(id, ret) {
+		return
+	}
 
-	luteEngine := model.NewLute()
+	luteEngine := util.NewLute()
 	if "markdown" == dataType {
 		data = dataBlockDOM(data, luteEngine)
 	}
@@ -190,7 +209,7 @@ func updateBlock(c *gin.Context) {
 		return
 	}
 
-	block, err := model.GetBlock(id)
+	block, err := model.GetBlock(id, nil)
 	if nil != err {
 		ret.Code = -1
 		ret.Msg = "get block failed: " + err.Error()
@@ -199,7 +218,7 @@ func updateBlock(c *gin.Context) {
 
 	var transactions []*model.Transaction
 	if "NodeDocument" == block.Type {
-		oldTree, err := model.LoadTree(block.Box, block.Path)
+		oldTree, err := filesys.LoadTree(block.Box, block.Path, luteEngine)
 		if nil != err {
 			ret.Code = -1
 			ret.Msg = "load tree failed: " + err.Error()
@@ -264,6 +283,9 @@ func deleteBlock(c *gin.Context) {
 	}
 
 	id := arg["id"].(string)
+	if util.InvalidIDPattern(id, ret) {
+		return
+	}
 
 	transactions := []*model.Transaction{
 		{
@@ -299,7 +321,7 @@ func dataBlockDOM(data string, luteEngine *lute.Lute) (ret string) {
 	ret = luteEngine.Md2BlockDOM(data, true)
 	if "" == ret {
 		// 使用 API 插入空字符串出现错误 https://github.com/siyuan-note/siyuan/issues/3931
-		blankParagraph := parse.NewParagraph()
+		blankParagraph := treenode.NewParagraph()
 		ret = lute.RenderNodeBlockDOM(blankParagraph, luteEngine.ParseOptions, luteEngine.RenderOptions)
 	}
 	return

@@ -17,6 +17,7 @@ import {genEmptyElement, genSBElement} from "../../block/util";
 import {hideElements} from "../ui/hideElements";
 import {reloadProtyle} from "../util/reload";
 import {countBlockWord} from "../../layout/status";
+import {needSubscribe} from "../../util/needSubscribe";
 
 const removeTopElement = (updateElement: Element, protyle: IProtyle) => {
     // 移动到其他文档中，该块需移除
@@ -73,6 +74,12 @@ const promiseTransaction = () => {
             return;
         }
         countBlockWord([], protyle.block.rootID, true);
+        /// #if MOBILE
+        if ((0 !== window.siyuan.config.sync.provider || (0 === window.siyuan.config.sync.provider && !needSubscribe(""))) &&
+            window.siyuan.config.repo.key && window.siyuan.config.sync.enabled) {
+            document.getElementById("transactionTip").classList.remove("fn__none");
+        }
+        /// #endif
         if (response.data[0].doOperations[0].action === "setAttrs") {
             const gutterFoldElement = protyle.gutter.element.querySelector('[data-type="fold"]');
             if (gutterFoldElement) {
@@ -424,7 +431,7 @@ export const onTransaction = (protyle: IProtyle, operation: IOperation, focus: b
         const attrsResult: IObject = {};
         Object.keys(data.new).forEach(key => {
             attrsResult[key] = data.new[key];
-            const escapeHTML = data.new[key];
+            const escapeHTML = Lute.EscapeHTMLStr(data.new[key]);
             if (key === "bookmark") {
                 nodeAttrHTML += `<div class="protyle-attr--bookmark">${escapeHTML}</div>`;
             } else if (key === "name") {
@@ -443,6 +450,20 @@ export const onTransaction = (protyle: IProtyle, operation: IOperation, focus: b
             }
             protyle.title.element.querySelector(".protyle-attr").innerHTML = nodeAttrHTML;
             protyle.wysiwyg.renderCustom(attrsResult);
+            if (data.new.icon !== data.old.icon) {
+                /// #if MOBILE
+                if (window.siyuan.mobile.editor.protyle.background.ial.icon !== data.new.icon) {
+                    window.siyuan.mobile.editor.protyle.background.ial.icon = data.new.icon;
+                    window.siyuan.mobile.editor.protyle.background.render(window.siyuan.mobile.editor.protyle.background.ial, window.siyuan.mobile.editor.protyle.block.rootID);
+                }
+                /// #else
+                if (protyle.background.ial.icon !== data.new.icon) {
+                    protyle.background.ial.icon = data.new.icon;
+                    protyle.background.render(protyle.background.ial, protyle.block.rootID);
+                    protyle.model?.parent.setDocIcon(data.new.icon);
+                }
+                /// #endif
+            }
             return;
         }
         protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.id}"]`).forEach(item => {
@@ -611,7 +632,12 @@ export const onTransaction = (protyle: IProtyle, operation: IOperation, focus: b
     }
 };
 
-export const turnsIntoOneTransaction = (options: { protyle: IProtyle, selectsElement: Element[], type: string, level?: string }) => {
+export const turnsIntoOneTransaction = (options: {
+    protyle: IProtyle,
+    selectsElement: Element[],
+    type: string,
+    level?: string
+}) => {
     let parentElement: Element;
     const id = Lute.NewNodeID();
     if (options.type === "BlocksMergeSuperBlock") {

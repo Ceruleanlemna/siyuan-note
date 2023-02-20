@@ -16,7 +16,9 @@ export abstract class Constants {
 
     // drop 事件
     public static readonly SIYUAN_DROP_FILE: string = "application/siyuan-file";
+    public static readonly SIYUAN_DROP_GUTTER: string = "application/siyuan-gutter";
     public static readonly SIYUAN_DROP_TAB: string = "application/siyuan-tab";
+    public static readonly SIYUAN_DROP_TABTOWINDOW: string = "application/siyuan-tabtowindow";
     public static readonly SIYUAN_DROP_EDITOR: string = "application/siyuan-editor";
 
     // 渲染进程调主进程
@@ -28,13 +30,15 @@ export abstract class Constants {
     public static readonly SIYUAN_HOTKEY: string = "siyuan-hotkey";
     public static readonly SIYUAN_INIT: string = "siyuan-init";
     public static readonly SIYUAN_OPENURL: string = "siyuan-openurl";
+    public static readonly SIYUAN_OPENWINDOW: string = "siyuan-openwindow";
+    public static readonly SIYUAN_CLOSETAB: string = "siyuan-closetab";
     public static readonly SIYUAN_SAVE_CLOSE: string = "siyuan-save-close";
     public static readonly SIYUAN_EXPORT_PDF: string = "siyuan-export-pdf";
     public static readonly SIYUAN_EXPORT_CLOSE: string = "siyuan-export-close";
     public static readonly SIYUAN_EXPORT_PREVENT: string = "siyuan-export-prevent";
 
     // size
-    public static readonly SIZE_TOOLBAR_HEIGHT: number = 42;
+    public static readonly SIZE_TOOLBAR_HEIGHT: number = 32;
     public static readonly SIZE_GET_MAX = 102400;
     public static readonly SIZE_UNDO = 64;
     public static readonly SIZE_TITLE = 512;
@@ -71,6 +75,7 @@ export abstract class Constants {
     public static readonly LOCAL_FONTSTYLES = "local-fontstyles";
     public static readonly LOCAL_EXPORTPDF = "local-exportpdf";
     public static readonly LOCAL_EXPORTWORD = "local-exportword";
+    public static readonly LOCAL_EXPORTIMG = "local-exportimg";
     public static readonly LOCAL_BAZAAR = "local-bazaar";
     public static readonly LOCAL_PDFTHEME = "local-pdftheme";
 
@@ -87,12 +92,6 @@ export abstract class Constants {
         zh_CHT: "20211226090932-5lcq56f",
         en_US: "20210808180117-6v0mkxr",
         fr_FR: "20210808180117-6v0mkxr",
-    };
-    public static readonly HELP_START_PATH = {
-        zh_CN: "20200812220555-lj3enxa",
-        zh_CHT: "20211226115423-d5z1joq",
-        en_US: "20200923234011-ieuun1p",
-        fr_FR: "20200923234011-ieuun1p",
     };
 
     public static readonly KEYCODE: { [key: string]: string[] } = {
@@ -316,62 +315,74 @@ export abstract class Constants {
                 }]
             }]
         },
-        top: [],
-        bottom: [],
-        left: [
-            [{
-                type: "file",
-                size: {width: 240, height: 0},
-                show: true,
-                icon: "iconFiles",
-                hotkeyLangId: "fileTree",
-            }, {
-                type: "outline",
-                size: {width: 240, height: 0},
-                show: false,
-                icon: "iconAlignCenter",
-                hotkeyLangId: "outline",
-            }, {
-                type: "inbox",
-                size: {width: 252, height: 0},
-                show: false,
-                icon: "iconInbox",
-                hotkeyLangId: "inbox",
-            }], [{
-                type: "bookmark",
-                size: {width: 240, height: 0},
-                show: false,
-                icon: "iconBookmark",
-                hotkeyLangId: "bookmark",
-            }, {
-                type: "tag",
-                size: {width: 240, height: 0},
-                show: false,
-                icon: "iconTags",
-                hotkeyLangId: "tag",
-            }]
-        ],
-        right: [
-            [{
-                type: "graph",
-                size: {width: 360, height: 0},
-                show: false,
-                icon: "iconGraph",
-                hotkeyLangId: "graphView",
-            }, {
-                type: "globalGraph",
-                size: {width: 360, height: 0},
-                show: false,
-                icon: "iconGlobalGraph",
-                hotkeyLangId: "globalGraph",
-            }], [{
-                type: "backlink",
-                size: {width: 360, height: 0},
-                show: false,
-                icon: "iconLink",
-                hotkeyLangId: "backlinks",
-            }]
-        ]
+        top: {
+            pin: true,
+            data: []
+        },
+        bottom: {
+            pin: true,
+            data: []
+        },
+        left: {
+            pin: true,
+            data: [
+                [{
+                    type: "file",
+                    size: {width: 240, height: 0},
+                    show: true,
+                    icon: "iconFiles",
+                    hotkeyLangId: "fileTree",
+                }, {
+                    type: "outline",
+                    size: {width: 240, height: 0},
+                    show: false,
+                    icon: "iconAlignCenter",
+                    hotkeyLangId: "outline",
+                }, {
+                    type: "inbox",
+                    size: {width: 252, height: 0},
+                    show: false,
+                    icon: "iconInbox",
+                    hotkeyLangId: "inbox",
+                }], [{
+                    type: "bookmark",
+                    size: {width: 240, height: 0},
+                    show: false,
+                    icon: "iconBookmark",
+                    hotkeyLangId: "bookmark",
+                }, {
+                    type: "tag",
+                    size: {width: 240, height: 0},
+                    show: false,
+                    icon: "iconTags",
+                    hotkeyLangId: "tag",
+                }]
+            ]
+        },
+        right: {
+            pin: true,
+            data: [
+                [{
+                    type: "graph",
+                    size: {width: 360, height: 0},
+                    show: false,
+                    icon: "iconGraph",
+                    hotkeyLangId: "graphView",
+                }, {
+                    type: "globalGraph",
+                    size: {width: 360, height: 0},
+                    show: false,
+                    icon: "iconGlobalGraph",
+                    hotkeyLangId: "globalGraph",
+                }], [{
+                    type: "backlink",
+                    size: {width: 360, height: 0},
+                    show: false,
+                    icon: "iconLink",
+                    hotkeyLangId: "backlinks",
+                }]
+            ]
+        }
     };
 
     // image

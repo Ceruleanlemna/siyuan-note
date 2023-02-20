@@ -337,6 +337,7 @@ interface IHintData {
     html: string;
     value: string;
     filter?: string[]
+    focus?: boolean
 }
 
 interface IHintExtend {
@@ -377,7 +378,6 @@ interface IOptions {
         scroll?: boolean
         breadcrumb?: boolean
         breadcrumbDocName?: boolean
-        breadcrumbContext?: boolean
     }
     /** 内部调试时使用 */
     _lutePath?: string;
@@ -430,7 +430,7 @@ interface IProtyle {
     gutter?: import("../protyle/gutter").Gutter,
     breadcrumb?: import("../protyle/breadcrumb").Breadcrumb,
     title?: import("../protyle/header/Title").Title,
-    background?: import("../protyle/header/Background").Background,
+    background?: import("../protyle/header/background").Background,
     contentElement?: HTMLElement,
     options: IOptions;
     lute?: Lute;

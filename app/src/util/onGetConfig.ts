@@ -1,5 +1,5 @@
 import {openSearch} from "../search/spread";
-import {exportLayout, JSONToLayout, resetLayout, resizeDrag, resizeTabs} from "../layout/util";
+import {exportLayout, getInstanceById, JSONToLayout, resetLayout, resizeDrag, resizeTabs} from "../layout/util";
 import {hotKey2Electron, setStorageVal, updateHotkeyTip} from "../protyle/util/compatibility";
 /// #if !BROWSER
 import {dialog, getCurrentWindow} from "@electron/remote";
@@ -18,9 +18,9 @@ import {addGA, initAssets, setInlineStyle, setMode} from "./assets";
 import {renderSnippet} from "../config/util/snippets";
 import {openFileById} from "../editor/util";
 import {focusByRange} from "../protyle/util/selection";
-import {exitSiYuan} from "../dialog/processSystem";
+import {exitSiYuan, processSync} from "../dialog/processSystem";
 import {openSetting} from "../config";
-import {getSearch} from "./functions";
+import {getSearch, isWindow} from "./functions";
 import {initStatus} from "../layout/status";
 import {syncGuide} from "../sync/syncGuide";
 import {showMessage} from "../dialog/message";
@@ -28,7 +28,9 @@ import {editor} from "../config/editor";
 import {goBack, goForward} from "./backForward";
 import {replaceLocalPath} from "../editor/rename";
 import {workspaceMenu} from "../menus/workspace";
-import { getWorkspaceName } from "./noRelyPCFunction";
+import {getWorkspaceName} from "./noRelyPCFunction";
+import {setTabPosition} from "../window/setHeader";
+import {Tab} from "../layout/Tab";
 
 const matchKeymap = (keymap: Record<string, IKeymapItem>, key1: "general" | "editor", key2?: "general" | "insert" | "heading" | "list" | "table") => {
     if (key1 === "general") {
@@ -118,8 +120,9 @@ export const onGetConfig = (isStart: boolean) => {
     const hasKeymap4 = hasKeymap(Constants.SIYUAN_KEYMAP.editor.heading, "editor", "heading");
     const hasKeymap5 = hasKeymap(Constants.SIYUAN_KEYMAP.editor.list, "editor", "list");
     const hasKeymap6 = hasKeymap(Constants.SIYUAN_KEYMAP.editor.table, "editor", "table");
-    if (!window.siyuan.config.readonly && (!matchKeymap1 || !matchKeymap2 || !matchKeymap3 || !matchKeymap4 || !matchKeymap5 || !matchKeymap6) &&
-        (!hasKeymap1 || !hasKeymap2 || !hasKeymap3 || !hasKeymap4 || !hasKeymap5 || !hasKeymap6)) {
+    if (!window.siyuan.config.readonly &&
+        (!matchKeymap1 || !matchKeymap2 || !matchKeymap3 || !matchKeymap4 || !matchKeymap5 || !matchKeymap6 ||
+            !hasKeymap1 || !hasKeymap2 || !hasKeymap3 || !hasKeymap4 || !hasKeymap5 || !hasKeymap6)) {
         fetchPost("/api/setting/setKeymap", {
             data: window.siyuan.config.keymap
         }, () => {
@@ -179,15 +182,15 @@ export const onGetConfig = (isStart: boolean) => {
     addGA();
 };
 
-const initBar = () => {
-    const toolbar = document.getElementById("toolbar");
-    toolbar.innerHTML = `
+export const initBar = () => {
+    const toolbarElement = document.getElementById("toolbar");
+    toolbarElement.innerHTML = `
 <div id="barWorkspace" class="toolbar__item">
     <span class="toolbar__text">${getWorkspaceName()}</span>
     <svg class="toolbar__svg"><use xlink:href="#iconDown"></use></svg>
 </div>
 <div id="barSync" class="toolbar__item b3-tooltips b3-tooltips__se" aria-label="${window.siyuan.config.sync.stat || (window.siyuan.languages.syncNow + " " + updateHotkeyTip(window.siyuan.config.keymap.general.syncNow.custom))}">
-    <svg><use xlink:href="#iconCloud"></use></svg>
+    <svg><use xlink:href="#iconCloudSucc"></use></svg>
 </div>
 <button id="barBack" data-menu="true" class="toolbar__item toolbar__item--disabled b3-tooltips b3-tooltips__se" aria-label="${window.siyuan.languages.goBack} ${updateHotkeyTip(window.siyuan.config.keymap.general.goBack.custom)}">
     <svg><use xlink:href="#iconBack"></use></svg>
@@ -207,7 +210,8 @@ const initBar = () => {
     <svg><use xlink:href="#icon${window.siyuan.config.appearance.modeOS ? "Mode" : (window.siyuan.config.appearance.mode === 0 ? "Light" : "Dark")}"></use></svg>
 </div>
 <div class="fn__flex" id="windowControls"></div>`;
-    toolbar.addEventListener("click", (event: MouseEvent) => {
+    processSync();
+    toolbarElement.addEventListener("click", (event: MouseEvent) => {
         let target = event.target as HTMLElement;
         while (!target.classList.contains("toolbar")) {
             if (target.id === "barBack") {
@@ -324,28 +328,39 @@ const winOnClose = (currentWindow: Electron.BrowserWindow, close = false) => {
     /// #endif
 };
 
-const initWindow = () => {
+export const initWindow = () => {
     /// #if !BROWSER
     const currentWindow = getCurrentWindow();
     currentWindow.on("focus", winOnFocus);
     currentWindow.on("blur", () => {
         document.body.classList.add("body--blur");
     });
-    ipcRenderer.on(Constants.SIYUAN_OPENURL, (event, url) => {
-        if (!/^siyuan:\/\/blocks\/\d{14}-\w{7}/.test(url)) {
-            return;
-        }
-        const id = url.substr(16, 22);
-        fetchPost("/api/block/checkBlockExist", {id}, existResponse => {
-            if (existResponse.data) {
-                openFileById({
-                    id,
-                    action: [Constants.CB_GET_FOCUS, Constants.CB_GET_CONTEXT],
-                    zoomIn: getSearch("focus", url) === "1"
-                });
-                ipcRenderer.send(Constants.SIYUAN_SHOW, getCurrentWindow().id);
+    if (!isWindow()) {
+        ipcRenderer.on(Constants.SIYUAN_OPENURL, (event, url) => {
+            if (!/^siyuan:\/\/blocks\/\d{14}-\w{7}/.test(url)) {
+                return;
             }
+            const id = url.substr(16, 22);
+            fetchPost("/api/block/checkBlockExist", {id}, existResponse => {
+                if (existResponse.data) {
+                    openFileById({
+                        id,
+                        action: [Constants.CB_GET_FOCUS, Constants.CB_GET_CONTEXT],
+                        zoomIn: getSearch("focus", url) === "1"
+                    });
+                    ipcRenderer.send(Constants.SIYUAN_SHOW, getCurrentWindow().id);
+                }
+            });
         });
+        ipcRenderer.on(Constants.SIYUAN_SAVE_CLOSE, (event, close) => {
+            winOnClose(currentWindow, close);
+        });
+    }
+    ipcRenderer.on(Constants.SIYUAN_CLOSETAB, (e, ipcData) => {
+        const tab = getInstanceById(ipcData);
+        if (tab && tab instanceof Tab) {
+            tab.parent.removeTab(ipcData);
+        }
     });
     ipcRenderer.on(Constants.SIYUAN_LOCK_SCREEN, () => {
         exportLayout(false, () => {
@@ -353,9 +368,6 @@ const initWindow = () => {
                 window.location.reload();
             });
         });
-    });
-    ipcRenderer.on(Constants.SIYUAN_SAVE_CLOSE, (event, close) => {
-        winOnClose(currentWindow, close);
     });
     ipcRenderer.on(Constants.SIYUAN_EXPORT_CLOSE, () => {
         window.siyuan.printWin.destroy();
@@ -450,8 +462,27 @@ const initWindow = () => {
     window.addEventListener("beforeunload", () => {
         currentWindow.off("focus", winOnFocus);
     }, false);
-    if ("windows" !== window.siyuan.config.system.os && "linux" !== window.siyuan.config.system.os) {
-        document.getElementById("drag").addEventListener("dblclick", () => {
+    if (isWindow()) {
+        document.body.insertAdjacentHTML("beforeend", `<div class="toolbar__window">
+<div class="toolbar__item b3-tooltips b3-tooltips__sw" aria-label="${window.siyuan.languages.pin}" id="pinWindow">
+    <svg>
+        <use xlink:href="#iconPin"></use>
+    </svg>
+</div></div>`);
+        const pinElement = document.getElementById("pinWindow")
+        pinElement.addEventListener("click", () => {
+            pinElement.classList.toggle("toolbar__item--active")
+            if (pinElement.classList.contains("toolbar__item--active")) {
+                pinElement.setAttribute("aria-label", window.siyuan.languages.unpin);
+                currentWindow.setAlwaysOnTop(true, "pop-up-menu")
+            } else {
+                pinElement.setAttribute("aria-label", window.siyuan.languages.pin);
+                currentWindow.setAlwaysOnTop(false)
+            }
+        });
+    }
+    if ("darwin" === window.siyuan.config.system.os) {
+        document.getElementById("drag")?.addEventListener("dblclick", () => {
             if (currentWindow.isMaximized()) {
                 currentWindow.unmaximize();
             } else {
@@ -460,30 +491,29 @@ const initWindow = () => {
         });
         const toolbarElement = document.getElementById("toolbar");
         currentWindow.on("enter-full-screen", () => {
-            toolbarElement.style.paddingLeft = "0";
+            if (isWindow()) {
+                setTabPosition();
+            } else {
+                toolbarElement.style.paddingLeft = "0";
+            }
         });
         currentWindow.on("leave-full-screen", () => {
-            toolbarElement.setAttribute("style", "");
+            if (isWindow()) {
+                setTabPosition();
+            } else {
+                toolbarElement.setAttribute("style", "");
+            }
         });
 
-        if (currentWindow.isFullScreen()) {
+        if (currentWindow.isFullScreen() && !isWindow()) {
             toolbarElement.style.paddingLeft = "0";
         }
         return;
     }
     document.body.classList.add("body--win32");
 
-    //添加应用图标
-    const toolbar = document.getElementById("toolbar");
-    toolbar.insertAdjacentHTML("afterbegin", `<div class="toolbar__item" id="windowAppIcon">
-    <svg>
-        <use xlink:href="#iconSiYuan"></use>
-    </svg>
-</div>`);
-
-    //添加窗口控件
-    const controlsElement = document.getElementById("windowControls");
-    controlsElement.innerHTML = `<div class="toolbar__item b3-tooltips b3-tooltips__sw" aria-label="${window.siyuan.languages.min}" id="minWindow">
+    // 添加窗口控件
+    const controlsHTML = `<div class="toolbar__item b3-tooltips b3-tooltips__sw" aria-label="${window.siyuan.languages.min}" id="minWindow">
     <svg>
         <use xlink:href="#iconMin"></use>
     </svg>
@@ -503,6 +533,11 @@ const initWindow = () => {
         <use xlink:href="#iconClose"></use>
     </svg>
 </div>`;
+    if (isWindow()) {
+        document.querySelector(".toolbar__window").insertAdjacentHTML("beforeend", controlsHTML);
+    } else {
+        document.getElementById("windowControls").innerHTML = controlsHTML;
+    }
     const maxBtnElement = document.getElementById("maxWindow");
     const restoreBtnElement = document.getElementById("restoreWindow");
 
@@ -543,15 +578,21 @@ const initWindow = () => {
         currentWindow.minimize();
     });
     closeBtnElement.addEventListener("click", () => {
-        winOnClose(currentWindow);
+        if (isWindow()) {
+            currentWindow.destroy();
+        } else {
+            winOnClose(currentWindow);
+        }
     });
     /// #else
-    document.querySelector(".toolbar").classList.add("toolbar--browser");
-    window.addEventListener("beforeunload", () => {
-        exportLayout(false);
-    }, false);
-    window.addEventListener("pagehide", () => {
-        exportLayout(false);
-    }, false);
+    if (!isWindow()) {
+        document.querySelector(".toolbar").classList.add("toolbar--browser");
+        window.addEventListener("beforeunload", () => {
+            exportLayout(false);
+        }, false);
+        window.addEventListener("pagehide", () => {
+            exportLayout(false);
+        }, false);
+    }
     /// #endif
 };

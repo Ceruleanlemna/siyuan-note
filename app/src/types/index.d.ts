@@ -42,6 +42,7 @@ interface Window {
         writeClipboard(text: string): void
         writeImageClipboard(uri: string): void
         readClipboard(): string
+        getBlockURL(): string
     }
 
     goBack(): void
@@ -49,11 +50,13 @@ interface Window {
     showKeyboardToolbar(bottom?: number): void
 
     hideKeyboardToolbar(): void
+
+    openFileByURL(URL: string): boolean
 }
 
 interface IWorkspace {
-    path:string
-    closed:boolean
+    path: string
+    closed: boolean
 }
 
 interface ICard {
@@ -85,6 +88,7 @@ interface ISearchOption {
         listItem: boolean
         codeBlock: boolean
         htmlBlock: boolean
+        embedBlock: boolean
     }
 }
 
@@ -153,6 +157,7 @@ interface INotebook {
     closed: boolean
     icon: string
     sort: number
+    sortMode: number
 }
 
 interface ISiyuan {
@@ -170,7 +175,10 @@ interface ISiyuan {
     notebooks?: INotebook[],
     emojis?: IEmoji[],
     backStack?: IBackStack[],
-    mobileEditor?: import("../protyle").Protyle, // mobile
+    mobile?: {
+        editor?: import("../protyle").Protyle
+        files?: import("../mobile/util/MobileFiles").MobileFiles
+    },
     user?: {
         userId: string
         userName: string
@@ -354,7 +362,7 @@ declare interface IFileTree {
     removeDocWithoutConfirm: boolean
     allowCreateDeeper: boolean
     refCreateSavePath: string
-    createDocNameTemplate: string
+    docCreateSavePath: string
     sort: number
     maxOpenTabCount: number
     maxListCount: number
@@ -416,6 +424,7 @@ declare interface IConfig {
         container: "std" | "android" | "docker" | "ios"
         isMicrosoftStore: boolean
         os: "windows" | "linux" | "darwin"
+        osPlatform: string
         homeDir: string
         xanadu: boolean
         udanax: boolean
@@ -427,7 +436,7 @@ declare interface IConfig {
         autoLaunch: boolean
     }
     localIPs: string[]
-    readonly: boolean
+    readonly: boolean   // 全局只读
     uiLayout: Record<string, any>
     langs: { label: string, name: string }[]
     appearance: IAppearance
@@ -442,6 +451,7 @@ declare interface IConfig {
         sort: number
     }
     search: {
+        embedBlock: boolean
         htmlBlock: boolean
         document: boolean
         heading: boolean

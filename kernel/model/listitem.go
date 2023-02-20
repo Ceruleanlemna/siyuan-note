@@ -72,11 +72,11 @@ func ListItem2Doc(srcListItemID, targetBoxID, targetPath string) (srcRootBlockID
 		children = append(children, c)
 	}
 	if 1 > len(children) {
-		newNode := parse.NewParagraph()
+		newNode := treenode.NewParagraph()
 		children = append(children, newNode)
 	}
 
-	luteEngine := NewLute()
+	luteEngine := util.NewLute()
 	newTree := &parse.Tree{Root: &ast.Node{Type: ast.NodeDocument, ID: srcListItemID}, Context: &parse.Context{ParseOption: luteEngine.ParseOptions}}
 	for _, c := range children {
 		newTree.Root.AppendChild(c)
@@ -96,7 +96,7 @@ func ListItem2Doc(srcListItemID, targetBoxID, targetPath string) (srcRootBlockID
 	}
 	srcTree.Root.SetIALAttr("updated", util.CurrentTimeSecondsStr())
 	if nil == srcTree.Root.FirstChild {
-		srcTree.Root.AppendChild(parse.NewParagraph())
+		srcTree.Root.AppendChild(treenode.NewParagraph())
 	}
 	if err = indexWriteJSONQueue(srcTree); nil != err {
 		return "", "", err

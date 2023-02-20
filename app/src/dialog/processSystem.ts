@@ -12,6 +12,7 @@ import {confirmDialog} from "./confirmDialog";
 import {getCurrentWindow} from "@electron/remote";
 import {escapeHtml} from "../util/escape";
 import {getWorkspaceName} from "../util/noRelyPCFunction";
+import {needSubscribe} from "../util/needSubscribe";
 
 export const lockScreen = () => {
     /// #if BROWSER
@@ -186,14 +187,18 @@ export const transactionError = (data: { code: number, data: string }) => {
     });
     btnsElement[1].addEventListener("click", () => {
         fetchPost("/api/filetree/refreshFiletree", {});
+        dialog.destroy();
     });
 };
 
 let progressStatusTimeoutId: number;
 export const progressStatus = (data: IWebSocketData) => {
+    const statusElement = document.querySelector("#status") as HTMLElement;
+    if (!statusElement) {
+        return;
+    }
     if (isMobile()) {
         clearTimeout(progressStatusTimeoutId);
-        const statusElement = document.querySelector("#status") as HTMLElement;
         statusElement.innerHTML = data.msg;
         statusElement.classList.remove("status--hide");
         if (document.querySelector("#keyboardToolbar").classList.contains("fn__none")) {
@@ -206,7 +211,10 @@ export const progressStatus = (data: IWebSocketData) => {
         }, 6000);
         return;
     }
-    document.querySelector("#status .status__msg").innerHTML = data.msg;
+    const msgElement = statusElement.querySelector(".status__msg");
+    if (msgElement) {
+        msgElement.innerHTML = data.msg;
+    }
 };
 
 export const progressLoading = (data: IWebSocketData) => {
@@ -237,6 +245,24 @@ export const progressLoading = (data: IWebSocketData) => {
     <div>${data.msg}</div>
 </div>`;
         }
+    }
+};
+
+export const progressBackgroundTask = (tasks:{action:string}[]) => {
+    const backgroundTaskElement = document.querySelector(".status__backgroundtask");
+    if (!backgroundTaskElement) {
+        return;
+    }
+    if (tasks.length === 0) {
+        backgroundTaskElement.classList.add("fn__none");
+        if (!window.siyuan.menus.menu.element.classList.contains("fn__none") &&
+            window.siyuan.menus.menu.element.getAttribute("data-name") === "statusBackgroundTask") {
+            window.siyuan.menus.menu.remove();
+        }
+    } else {
+        backgroundTaskElement.classList.remove("fn__none");
+        backgroundTaskElement.setAttribute("data-tasks", JSON.stringify(tasks));
+        backgroundTaskElement.innerHTML = tasks[0].action + "<div><div></div></div>";
     }
 };
 
@@ -307,4 +333,35 @@ export const downloadProgress = (data: { id: string, percent: number }) => {
             btnElement.innerHTML = `<span style="width: ${data.percent * 100}%"></span>`;
         }
     }
+};
+
+export const processSync = (data?: IWebSocketData) => {
+    const iconElement = document.querySelector(isMobile()?"#menuSyncNow" : "#barSync");
+    if (!iconElement) {
+        return;
+    }
+    const useElement = iconElement.querySelector("use");
+    if (!data) {
+        iconElement.classList.remove("toolbar__item--active");
+        if (!window.siyuan.config.sync.enabled || (0 === window.siyuan.config.sync.provider && needSubscribe(""))) {
+            iconElement.setAttribute("aria-label", window.siyuan.languages["_kernel"]["53"]);
+            useElement.setAttribute("xlink:href", "#iconCloudOff");
+        } else {
+            useElement.setAttribute("xlink:href", "#iconCloudSucc");
+        }
+        return;
+    }
+    iconElement.firstElementChild.classList.remove("fn__rotate");
+    if (data.code === 0) {  // syncing
+        iconElement.classList.add("toolbar__item--active");
+        iconElement.firstElementChild.classList.add("fn__rotate");
+        useElement.setAttribute("xlink:href", "#iconRefresh");
+    } else if (data.code === 2) {    // error
+        iconElement.classList.remove("toolbar__item--active");
+        useElement.setAttribute("xlink:href", "#iconCloudError");
+    } else if (data.code === 1) {   // success
+        iconElement.classList.remove("toolbar__item--active");
+        useElement.setAttribute("xlink:href", "#iconCloudSucc");
+    }
+    iconElement.setAttribute("aria-label", data.msg);
 };

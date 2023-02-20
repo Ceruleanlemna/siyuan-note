@@ -15,6 +15,7 @@ import {getAllDocks} from "../layout/getAll";
 import {getDockByType} from "../layout/util";
 import {lockScreen} from "../dialog/processSystem";
 import {showMessage} from "../dialog/message";
+import {unicode2Emoji} from "../emoji";
 
 export const workspaceMenu = (rect: DOMRect) => {
     if (!window.siyuan.menus.menu.element.classList.contains("fn__none") &&
@@ -22,9 +23,9 @@ export const workspaceMenu = (rect: DOMRect) => {
         window.siyuan.menus.menu.remove();
         return;
     }
-    window.siyuan.menus.menu.remove();
-    window.siyuan.menus.menu.element.setAttribute("data-name", "barWorkspace");
     fetchPost("/api/system/getWorkspaces", {}, (response) => {
+        window.siyuan.menus.menu.remove();
+        window.siyuan.menus.menu.element.setAttribute("data-name", "barWorkspace");
         if (!window.siyuan.config.readonly) {
             window.siyuan.menus.menu.append(new MenuItem({
                 label: window.siyuan.languages.config,
@@ -47,7 +48,7 @@ export const workspaceMenu = (rect: DOMRect) => {
             });
         });
         window.siyuan.menus.menu.append(new MenuItem({
-            label: window.siyuan.languages.panel,
+            label: window.siyuan.languages.panels,
             icon: "iconDock",
             type: "submenu",
             submenu: dockMenu
@@ -95,6 +96,7 @@ export const workspaceMenu = (rect: DOMRect) => {
                     if (!item.closed) {
                         submenu.push({
                             label: item.name,
+                            iconHTML: unicode2Emoji(item.icon || Constants.SIYUAN_IMAGE_NOTE, false, "b3-menu__icon", true),
                             accelerator: window.siyuan.storage[Constants.LOCAL_DAILYNOTEID] === item.id ? window.siyuan.config.keymap.general.dailyNote.custom : "",
                             click: () => {
                                 fetchPost("/api/filetree/createDailyNote", {

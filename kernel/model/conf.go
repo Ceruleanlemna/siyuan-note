@@ -19,6 +19,7 @@ package model
 import (
 	"bytes"
 	"fmt"
+	"github.com/88250/lute/ast"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -104,7 +105,7 @@ func InitConf() {
 
 			if userLang, err := locale.Detect(); nil == err {
 				var supportLangs []language.Tag
-				for lang := range langs {
+				for lang := range util.Langs {
 					if tag, err := language.Parse(lang); nil == err {
 						supportLangs = append(supportLangs, tag)
 					} else {
@@ -124,6 +125,7 @@ func InitConf() {
 				Conf.Lang = util.Lang
 			}
 		}
+		util.Lang = Conf.Lang
 	}
 
 	Conf.Langs = loadLangs()
@@ -139,6 +141,7 @@ func InitConf() {
 	}
 	if !langOK {
 		Conf.Lang = "en_US"
+		util.Lang = Conf.Lang
 	}
 	Conf.Appearance.Lang = Conf.Lang
 	if nil == Conf.UILayout {
@@ -165,6 +168,12 @@ func InitConf() {
 	if 32 < Conf.FileTree.MaxOpenTabCount {
 		Conf.FileTree.MaxOpenTabCount = 32
 	}
+	Conf.FileTree.DocCreateSavePath = strings.TrimSpace(Conf.FileTree.DocCreateSavePath)
+	for strings.HasSuffix(Conf.FileTree.DocCreateSavePath, "/") {
+		Conf.FileTree.DocCreateSavePath = strings.TrimSuffix(Conf.FileTree.DocCreateSavePath, "/")
+		Conf.FileTree.DocCreateSavePath = strings.TrimSpace(Conf.FileTree.DocCreateSavePath)
+	}
+
 	if nil == Conf.Tag {
 		Conf.Tag = conf.NewTag()
 	}
@@ -212,7 +221,7 @@ func InitConf() {
 	if "" == Conf.System.ID {
 		Conf.System.ID = util.GetDeviceID()
 	}
-	if "std" == util.Container {
+	if util.ContainerStd == util.Container {
 		Conf.System.ID = util.GetDeviceID()
 	}
 
@@ -227,6 +236,7 @@ func InitConf() {
 		logging.LogInfof("using Microsoft Store edition")
 	}
 	Conf.System.OS = runtime.GOOS
+	Conf.System.OSPlatform, _ = util.GetOSPlatform()
 	Conf.Newbie = util.IsNewbie
 
 	if "" != Conf.UserData {
@@ -320,9 +330,6 @@ func InitConf() {
 	util.SetNetworkProxy(Conf.System.NetworkProxy.String())
 }
 
-var langs = map[string]map[int]string{}
-var timeLangs = map[string]map[string]interface{}{}
-
 func initLang() {
 	p := filepath.Join(util.WorkingDir, "appearance", "langs")
 	dir, err := os.Open(p)
@@ -362,14 +369,15 @@ func initLang() {
 		}
 		kernelMap[-1] = label
 		name := langName[:strings.LastIndex(langName, ".")]
-		langs[name] = kernelMap
+		util.Langs[name] = kernelMap
 
-		timeLangs[name] = langMap["_time"].(map[string]interface{})
+		util.TimeLangs[name] = langMap["_time"].(map[string]interface{})
+		util.TaskActionLangs[name] = langMap["_taskAction"].(map[string]interface{})
 	}
 }
 
 func loadLangs() (ret []*conf.Lang) {
-	for name, langMap := range langs {
+	for name, langMap := range util.Langs {
 		lang := &conf.Lang{Label: langMap[-1], Name: name}
 		ret = append(ret, lang)
 	}
@@ -391,24 +399,22 @@ var exitLock = sync.Mutex{}
 func Close(force bool, execInstallPkg int) (exitCode int) {
 	exitLock.Lock()
 	defer exitLock.Unlock()
+	util.IsExiting = true
 
 	logging.LogInfof("exiting kernel [force=%v, execInstallPkg=%d]", force, execInstallPkg)
 	util.PushMsg(Conf.Language(95), 10000*60)
 	WaitForWritingFiles()
 
 	if !force {
-		SyncData(false, true, false)
-		if 0 != ExitSyncSucc {
-			exitCode = 1
-			return
+		if Conf.Sync.Enabled && 3 != Conf.Sync.Mode &&
+			((IsSubscriber() && conf.ProviderSiYuan == Conf.Sync.Provider) || conf.ProviderSiYuan != Conf.Sync.Provider) {
+			syncData(false, true, false)
+			if 0 != ExitSyncSucc {
+				exitCode = 1
+				return
+			}
 		}
 	}
-
-	//util.UIProcessIDs.Range(func(key, _ interface{}) bool {
-	//	pid := key.(string)
-	//	util.Kill(pid)
-	//	return true
-	//})
 
 	waitSecondForExecInstallPkg := false
 	if !skipNewVerInstallPkg() {
@@ -430,6 +436,7 @@ func Close(force bool, execInstallPkg int) (exitCode int) {
 	treenode.SaveBlockTree(false)
 	SaveAssetsTexts()
 	clearWorkspaceTemp()
+	clearCorruptedNotebooks()
 	clearPortJSON()
 	util.UnlockWorkspace()
 
@@ -570,11 +577,11 @@ func (conf *AppConf) GetClosedBoxes() (ret []*Box) {
 }
 
 func (conf *AppConf) Language(num int) (ret string) {
-	ret = langs[conf.Lang][num]
+	ret = util.Langs[conf.Lang][num]
 	if "" != ret {
 		return
 	}
-	ret = langs["en_US"][num]
+	ret = util.Langs["en_US"][num]
 	return
 }
 
@@ -601,7 +608,7 @@ func InitBoxes() {
 		box.UpdateHistoryGenerated() // 初始化历史生成时间为当前时间
 
 		if !initialized {
-			box.Index(true)
+			index(box.ID)
 		}
 	}
 
@@ -673,12 +680,43 @@ func clearPortJSON() {
 	}
 }
 
+func clearCorruptedNotebooks() {
+	// 数据同步时展开文档树操作可能导致数据丢失 https://github.com/siyuan-note/siyuan/issues/7129
+
+	dirs, err := os.ReadDir(util.DataDir)
+	if nil != err {
+		logging.LogErrorf("read dir [%s] failed: %s", util.DataDir, err)
+		return
+	}
+	for _, dir := range dirs {
+		if util.IsReservedFilename(dir.Name()) {
+			continue
+		}
+
+		if !dir.IsDir() {
+			continue
+		}
+
+		if !ast.IsNodeIDPattern(dir.Name()) {
+			continue
+		}
+
+		boxDirPath := filepath.Join(util.DataDir, dir.Name())
+		boxConfPath := filepath.Join(boxDirPath, ".siyuan", "conf.json")
+		if !gulu.File.IsExist(boxConfPath) {
+			logging.LogWarnf("found a corrupted box [%s]", boxDirPath)
+			continue
+		}
+	}
+}
+
 func clearWorkspaceTemp() {
 	os.RemoveAll(filepath.Join(util.TempDir, "bazaar"))
 	os.RemoveAll(filepath.Join(util.TempDir, "export"))
 	os.RemoveAll(filepath.Join(util.TempDir, "import"))
 	os.RemoveAll(filepath.Join(util.TempDir, "repo"))
 	os.RemoveAll(filepath.Join(util.TempDir, "os"))
+	os.RemoveAll(filepath.Join(util.TempDir, "blocktree.msgpack")) // v2.7.2 前旧版的块数数据
 
 	// 退出时自动删除超过 7 天的安装包 https://github.com/siyuan-note/siyuan/issues/6128
 	install := filepath.Join(util.TempDir, "install")

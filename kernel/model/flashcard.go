@@ -58,7 +58,7 @@ func GetFlashcards(deckID string, page int) (blocks []*Block, total, pageCount i
 	start := (page - 1) * pageSize
 	end := page * pageSize
 	if start > len(allBlockIDs) {
-		return
+		start = len(allBlockIDs)
 	}
 	if end > len(allBlockIDs) {
 		end = len(allBlockIDs)
@@ -359,7 +359,7 @@ func AddFlashcards(deckID string, blockIDs []string) (err error) {
 	return
 }
 
-func InitFlashcards() {
+func LoadFlashcards() {
 	riffSavePath := getRiffDir()
 	if err := os.MkdirAll(riffSavePath, 0755); nil != err {
 		logging.LogErrorf("create riff dir [%s] failed: %s", riffSavePath, err)
@@ -445,7 +445,7 @@ func RemoveDeck(deckID string) (err error) {
 		}
 	}
 
-	InitFlashcards()
+	LoadFlashcards()
 	return
 }
 

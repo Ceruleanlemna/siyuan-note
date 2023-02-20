@@ -6,7 +6,7 @@ import {isBrowser} from "../util/functions";
 import {fetchPost} from "../util/fetch";
 import {setAccessAuthCode} from "./util/setAccessAuthCode";
 import {exportLayout} from "../layout/util";
-import {exitSiYuan} from "../dialog/processSystem";
+import {exitSiYuan, processSync} from "../dialog/processSystem";
 import {openByMobile, writeText} from "../protyle/util/compatibility";
 import {showMessage} from "../dialog/message";
 import {Dialog} from "../dialog";
@@ -24,7 +24,7 @@ export const about = {
     <div class="fn__space"></div>
     <input class="b3-switch fn__flex-center" id="autoLaunch" type="checkbox"${window.siyuan.config.system.autoLaunch ? " checked" : ""}>
 </label>
-<label class="fn__flex b3-label${isBrowser() || window.siyuan.config.system.isMicrosoftStore ? " fn__none" : ""}">
+<label class="fn__flex b3-label${isBrowser() || window.siyuan.config.system.isMicrosoftStore || window.siyuan.config.system.container !== "std" ? " fn__none" : ""}">
     <div class="fn__flex-1">
         ${window.siyuan.languages.autoDownloadUpdatePkg}
         <div class="b3-label__text">${window.siyuan.languages.autoDownloadUpdatePkgTip}</div>
@@ -61,6 +61,7 @@ export const about = {
        ${window.siyuan.languages.about2}
         <div class="b3-label__text">${window.siyuan.languages.about3.replace("${port}", location.port)}</div>
         <span class="b3-label__text"><code class="fn__code">${window.siyuan.config.localIPs.join("</code> <code class='fn__code'>")}</code></span>
+      
     </div>
     <div class="fn__space"></div>
     <button data-type="open" data-url="http://${window.siyuan.config.system.networkServe ? window.siyuan.config.localIPs[0] : "127.0.0.1"}:${location.port}" class="b3-button b3-button--outline fn__size200 fn__flex-center">
@@ -297,6 +298,7 @@ export const about = {
                 fetchPost("/api/repo/resetRepo", {}, () => {
                     window.siyuan.config.repo.key = "";
                     window.siyuan.config.sync.enabled = false;
+                    processSync();
                     importKeyElement.parentElement.classList.remove("fn__none");
                     importKeyElement.parentElement.nextElementSibling.classList.add("fn__none");
                 });

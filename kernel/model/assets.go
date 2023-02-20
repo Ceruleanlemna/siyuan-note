@@ -40,6 +40,7 @@ import (
 	"github.com/siyuan-note/httpclient"
 	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/cache"
+	"github.com/siyuan-note/siyuan/kernel/filesys"
 	"github.com/siyuan-note/siyuan/kernel/search"
 	"github.com/siyuan-note/siyuan/kernel/sql"
 	"github.com/siyuan-note/siyuan/kernel/treenode"
@@ -176,8 +177,8 @@ func NetImg2LocalAssets(rootID string) (err error) {
 					}
 				}
 				name = strings.TrimSuffix(name, ext)
-				name = gulu.Str.SubStr(name, 64)
 				name = util.FilterFileName(name)
+				name = util.TruncateLenFileName(name)
 				name = "net-img-" + name + "-" + ast.NewNodeID() + ext
 				writePath := filepath.Join(assetsDirPath, name)
 				if err = filelock.WriteFile(writePath, data); nil != err {
@@ -419,7 +420,7 @@ func RemoveUnusedAssets() (ret []string) {
 		}
 	}
 
-	sql.DeleteAssetsByHashes(hashes)
+	sql.BatchRemoveAssetsQueue(hashes)
 
 	for _, unusedAsset := range unusedAssets {
 		if unusedAsset = filepath.Join(util.DataDir, unusedAsset); gulu.File.IsExist(unusedAsset) {
@@ -433,7 +434,7 @@ func RemoveUnusedAssets() (ret []string) {
 		IncSync()
 	}
 
-	indexHistoryDir(filepath.Base(historyDir), NewLute())
+	indexHistoryDir(filepath.Base(historyDir), util.NewLute())
 	cache.LoadAssets()
 	return
 }
@@ -458,7 +459,7 @@ func RemoveUnusedAsset(p string) (ret string) {
 		}
 
 		hash, _ := util.GetEtag(absPath)
-		sql.DeleteAssetsByHashes([]string{hash})
+		sql.BatchRemoveAssetsQueue([]string{hash})
 	}
 
 	if err = os.RemoveAll(absPath); nil != err {
@@ -467,7 +468,7 @@ func RemoveUnusedAsset(p string) (ret string) {
 	ret = absPath
 	IncSync()
 
-	indexHistoryDir(filepath.Base(historyDir), NewLute())
+	indexHistoryDir(filepath.Base(historyDir), util.NewLute())
 	cache.RemoveAsset(p)
 	return
 }
@@ -502,8 +503,11 @@ func RenameAsset(oldPath, newName string) (err error) {
 	if nil != err {
 		return
 	}
+
+	luteEngine := util.NewLute()
 	for _, notebook := range notebooks {
 		pages := pagedPaths(filepath.Join(util.DataDir, notebook.ID), 32)
+
 		for _, paths := range pages {
 			for _, treeAbsPath := range paths {
 				data, readErr := filelock.ReadFile(treeAbsPath)
@@ -513,6 +517,7 @@ func RenameAsset(oldPath, newName string) (err error) {
 					return
 				}
 
+				util.PushEndlessProgress(fmt.Sprintf(Conf.Language(70), filepath.Base(treeAbsPath)))
 				if !bytes.Contains(data, []byte(oldName)) {
 					continue
 				}
@@ -525,14 +530,13 @@ func RenameAsset(oldPath, newName string) (err error) {
 				}
 
 				p := filepath.ToSlash(strings.TrimPrefix(treeAbsPath, filepath.Join(util.DataDir, notebook.ID)))
-				tree, parseErr := LoadTree(notebook.ID, p)
+				tree, parseErr := filesys.LoadTreeByData(data, notebook.ID, p, luteEngine)
 				if nil != parseErr {
-					logging.LogErrorf("parse json to tree [%s] failed: %s", treeAbsPath, parseErr)
-					err = parseErr
-					return
+					logging.LogWarnf("parse json to tree [%s] failed: %s", treeAbsPath, parseErr)
+					continue
 				}
 
-				treenode.ReindexBlockTree(tree)
+				treenode.IndexBlockTree(tree)
 				sql.UpsertTreeQueue(tree)
 
 				util.PushEndlessProgress(fmt.Sprintf(Conf.Language(111), tree.Root.IALAttr("title")))
@@ -541,9 +545,6 @@ func RenameAsset(oldPath, newName string) (err error) {
 	}
 
 	IncSync()
-
-	util.PushEndlessProgress(Conf.Language(113))
-	sql.WaitForWritingDatabase()
 	util.ReloadUI()
 	return
 }
@@ -561,7 +562,7 @@ func UnusedAssets() (ret []string) {
 	if nil != err {
 		return
 	}
-	luteEngine := NewLute()
+	luteEngine := util.NewLute()
 	for _, notebook := range notebooks {
 		dests := map[string]bool{}
 

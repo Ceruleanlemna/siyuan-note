@@ -39,7 +39,6 @@ nsis:
   license: "../LICENSE"
   include: "installer.nsh"
 
-
 extraResources:
   - from: "appearance/boot"
     to: "appearance/boot"

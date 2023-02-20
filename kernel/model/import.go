@@ -53,7 +53,7 @@ import (
 
 func HTML2Markdown(htmlStr string) (markdown string, err error) {
 	assetDirPath := filepath.Join(util.DataDir, "assets")
-	luteEngine := NewLute()
+	luteEngine := util.NewLute()
 	luteEngine.SetProtyleWYSIWYG(false)
 	tree := luteEngine.HTML2Tree(htmlStr)
 	ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
@@ -126,7 +126,7 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 			err = readErr
 			return
 		}
-		tree, _, parseErr := parse.ParseJSON(data, luteEngine.ParseOptions)
+		tree, _, parseErr := filesys.ParseJSON(data, luteEngine.ParseOptions)
 		if nil != parseErr {
 			logging.LogErrorf("parse .sy [%s] failed: %s", syPath, parseErr)
 			err = parseErr
@@ -253,7 +253,7 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 			return err
 		}
 
-		if info.IsDir() && util.IsIDPattern(info.Name()) {
+		if info.IsDir() && ast.IsNodeIDPattern(info.Name()) {
 			renamePaths[path] = path
 		}
 		return nil
@@ -321,6 +321,7 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 		}
 	}
 
+	// 将包含的资源文件统一移动到 data/assets/ 下
 	var assetsDirs []string
 	filepath.Walk(unzipRootPath, func(path string, info fs.FileInfo, err error) error {
 		if strings.Contains(path, "assets") && info.IsDir() {
@@ -328,9 +329,9 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 		}
 		return nil
 	})
+	dataAssets := filepath.Join(util.DataDir, "assets")
 	for _, assets := range assetsDirs {
 		if gulu.File.IsDir(assets) {
-			dataAssets := filepath.Join(util.DataDir, "assets")
 			if err = filelock.Copy(assets, dataAssets); nil != err {
 				logging.LogErrorf("copy assets from [%s] to [%s] failed: %s", assets, dataAssets, err)
 				return
@@ -356,14 +357,47 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 		return
 	}
 
+	var treePaths []string
+	filepath.Walk(unzipRootPath, func(path string, info fs.FileInfo, err error) error {
+		if info.IsDir() {
+			if strings.HasPrefix(info.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if !strings.HasSuffix(info.Name(), ".sy") {
+			return nil
+		}
+
+		p := strings.TrimPrefix(path, unzipRootPath)
+		p = filepath.ToSlash(p)
+		treePaths = append(treePaths, p)
+		return nil
+	})
+
 	if err = filelock.RoboCopy(unzipRootPath, targetDir); nil != err {
 		logging.LogErrorf("copy data dir from [%s] to [%s] failed: %s", unzipRootPath, util.DataDir, err)
 		err = errors.New("copy data failed")
 		return
 	}
 
+	boxAbsPath := filepath.Join(util.DataDir, boxID)
+	for _, treePath := range treePaths {
+		absPath := filepath.Join(targetDir, treePath)
+		p := strings.TrimPrefix(absPath, boxAbsPath)
+		p = filepath.ToSlash(p)
+		tree, err := filesys.LoadTree(boxID, p, luteEngine)
+		if nil != err {
+			logging.LogErrorf("load tree [%s] failed: %s", treePath, err)
+			continue
+		}
+
+		treenode.IndexBlockTree(tree)
+		sql.UpsertTreeQueue(tree)
+	}
+
 	IncSync()
-	FullReindex()
 	return
 }
 
@@ -489,7 +523,7 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 			hPath = strings.TrimSuffix(hPath, ext)
 			if info.IsDir() {
 				tree = treenode.NewTree(boxID, targetPath, hPath, title)
-				if err = filesys.WriteTree(tree); nil != err {
+				if err = indexWriteJSONQueue(tree); nil != err {
 					return io.EOF
 				}
 				return nil
@@ -575,22 +609,14 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 			})
 
 			reassignIDUpdated(tree)
-			if err = filesys.WriteTree(tree); nil != err {
-				return io.EOF
-			}
+			indexWriteJSONQueue(tree)
+
 			i++
 			if 0 == i%4 {
-				util.PushEndlessProgress(fmt.Sprintf(Conf.Language(66), util.ShortPathForBootingDisplay(tree.Path)))
+				util.PushEndlessProgress(fmt.Sprintf(Conf.Language(66), fmt.Sprintf("%d ", i)+util.ShortPathForBootingDisplay(tree.Path)))
 			}
 			return nil
 		})
-
-		if nil != err {
-			return err
-		}
-
-		IncSync()
-		FullReindex()
 	} else { // 导入单个文件
 		fileName := filepath.Base(localPath)
 		if !strings.HasSuffix(fileName, ".md") && !strings.HasSuffix(fileName, ".markdown") {
@@ -668,20 +694,12 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 		})
 
 		reassignIDUpdated(tree)
-		if err = indexWriteJSONQueue(tree); nil != err {
-			return
-		}
-		IncSync()
-		sql.WaitForWritingDatabase()
-
-		util.PushEndlessProgress(Conf.Language(58))
-		go func() {
-			time.Sleep(2 * time.Second)
-			util.ReloadUI()
-		}()
+		indexWriteJSONQueue(tree)
 	}
-	debug.FreeOSMemory()
+
 	IncSync()
+	util.ReloadUI()
+	debug.FreeOSMemory()
 	return
 }
 

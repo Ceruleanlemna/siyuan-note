@@ -90,7 +90,7 @@ export const keydown = (protyle: IProtyle, editorElement: HTMLElement) => {
             event.code !== "") { // 悬浮工具会触发但 code 为空 https://github.com/siyuan-note/siyuan/issues/6573
             hideElements(["toolbar"], protyle);
         }
-        const range = getEditorRange(protyle.wysiwyg.element);
+        let range = getEditorRange(protyle.wysiwyg.element);
         const nodeElement = hasClosestBlock(range.startContainer);
         if (!nodeElement) {
             return;
@@ -134,9 +134,12 @@ export const keydown = (protyle: IProtyle, editorElement: HTMLElement) => {
         if (event.key !== "PageUp" && event.key !== "PageDown" && event.key !== "Home" && event.key !== "End" && event.key.indexOf("Arrow") === -1 &&
             event.key !== "Escape" && event.key !== "Shift" && event.key !== "Meta" && event.key !== "Alt" && event.key !== "Control" && event.key !== "CapsLock" &&
             !/^F\d{1,2}$/.test(event.key) && typeof protyle.wysiwyg.lastHTMLs[nodeElement.getAttribute("data-node-id")] === "undefined") {
+            const cloneRange = range.cloneRange();
             range.insertNode(document.createElement("wbr"));
             protyle.wysiwyg.lastHTMLs[nodeElement.getAttribute("data-node-id")] = nodeElement.outerHTML;
             nodeElement.querySelector("wbr").remove();
+            // 光标位于引用结尾后 ctrl+b 偶尔会失效
+            range = cloneRange;
         }
 
         if (bindMenuKeydown(event)) {
@@ -573,7 +576,6 @@ export const keydown = (protyle: IProtyle, editorElement: HTMLElement) => {
 
         // 上下左右光标移动
         if (!event.altKey && !event.shiftKey && !isCtrl(event) && !event.isComposing && (event.key.indexOf("Arrow") > -1)) {
-            protyle.hint.enableEmoji = false;
             // 需使用 editabled，否则代码块会把语言字数算入
             const nodeEditableElement = getContenteditableElement(nodeElement) || nodeElement;
             const position = getSelectionOffset(nodeEditableElement, protyle.wysiwyg.element, range);
@@ -1153,7 +1155,7 @@ export const keydown = (protyle: IProtyle, editorElement: HTMLElement) => {
                 !protyle.hint.element.classList.contains("fn__none") ||
                 !protyle.toolbar.subElement.classList.contains("fn__none")) {
                 hideElements(["toolbar", "hint", "util"], protyle);
-                protyle.hint.enableEmoji = false;
+                protyle.hint.enableExtend = false;
             } else if (nodeElement.classList.contains("protyle-wysiwyg--select")) {
                 hideElements(["select"], protyle);
                 countBlockWord([], protyle.block.rootID);
@@ -1617,7 +1619,7 @@ export const keydown = (protyle: IProtyle, editorElement: HTMLElement) => {
         }
         /// #endif
 
-        /// #if !BROWSER && !MOBILE
+        /// #if !BROWSER
         if (matchHotKey("⇧⌘V", event)) {
             event.returnValue = false;
             event.preventDefault();

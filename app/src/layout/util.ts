@@ -27,7 +27,7 @@ import {saveScroll} from "../protyle/scroll/saveScroll";
 import {pdfResize} from "../asset/renderAssets";
 import {Backlink} from "./dock/Backlink";
 import {openFileById} from "../editor/util";
-import {getSearch} from "../util/functions";
+import {getSearch, isWindow} from "../util/functions";
 
 export const setPanelFocus = (element: Element) => {
     if (element.classList.contains("layout__tab--active") || element.classList.contains("layout__wnd--active")) {
@@ -135,7 +135,10 @@ const dockToJSON = (dock: Dock) => {
     if (data2.length > 0) {
         json.push(data2);
     }
-    return json;
+    return {
+        pin: dock.pin,
+        data: json
+    };
 };
 
 export const resetLayout = () => {
@@ -175,11 +178,17 @@ const JSONToDock = (json: any) => {
     window.siyuan.layout.bottomDock = new Dock({position: "Bottom", data: json.bottom});
 };
 
-const JSONToCenter = (json: any, layout?: Layout | Wnd | Tab | Model) => {
+export const JSONToCenter = (json: any, layout?: Layout | Wnd | Tab | Model, isStart = false) => {
     let child: Layout | Wnd | Tab | Model;
     if (json.instance === "Layout") {
         if (!layout) {
-            window.siyuan.layout.layout = new Layout({element: document.getElementById("layouts")});
+            window.siyuan.layout.layout = new Layout({
+                element: document.getElementById("layouts"),
+                direction: json.direction,
+                size: json.size,
+                type: json.type,
+                resize: json.resize
+            });
         } else {
             child = new Layout({
                 direction: json.direction,
@@ -272,23 +281,28 @@ const JSONToCenter = (json: any, layout?: Layout | Wnd | Tab | Model) => {
     if (json.children) {
         if (Array.isArray(json.children)) {
             json.children.forEach((item: any, index: number) => {
-                JSONToCenter(item, layout ? child : window.siyuan.layout.layout);
+                JSONToCenter(item, layout ? child : window.siyuan.layout.layout, isStart);
                 if (item.instance === "Tab" && index === json.children.length - 1) {
                     const activeTabElement = (child as Wnd).headersElement.querySelector('[data-init-active="true"]') as HTMLElement;
                     if (activeTabElement) {
-                        activeTabElement.removeAttribute("data-init-active");
-                        (child as Wnd).switchTab(activeTabElement, false, false);
+                        if (window.siyuan.config.fileTree.closeTabsOnStart && isStart &&
+                            !item.pin && item.title) {
+                            // 启动时关闭所有页签就不应该再初始化它
+                        } else {
+                            activeTabElement.removeAttribute("data-init-active");
+                            (child as Wnd).switchTab(activeTabElement, false, false);
+                        }
                     }
                 }
             });
         } else {
-            JSONToCenter(json.children, child);
+            JSONToCenter(json.children, child, isStart);
         }
     }
 };
 
 export const JSONToLayout = (isStart: boolean) => {
-    JSONToCenter(window.siyuan.config.uiLayout.layout);
+    JSONToCenter(window.siyuan.config.uiLayout.layout, undefined, isStart);
     JSONToDock(window.siyuan.config.uiLayout);
     // 启动时不打开页签，需要移除没有钉住的页签
     if (window.siyuan.config.fileTree.closeTabsOnStart && isStart) {
@@ -298,7 +312,8 @@ export const JSONToLayout = (isStart: boolean) => {
             }
         });
     }
-    // https://github.com/siyuan-note/siyuan/pull/7086
+
+    // 支持通过 URL 查询字符串参数 `id` 和 `focus` 跳转到 Web 端指定块 https://github.com/siyuan-note/siyuan/pull/7086
     const openId = getSearch("id");
     if (openId) {
         // 启动时 layout 中有该文档，该文档还原会在此之后，因此需有延迟
@@ -490,6 +505,10 @@ export const resizeTabs = () => {
             });
         });
         pdfResize();
+        document.querySelectorAll(".protyle-gutters").forEach(item => {
+            item.classList.add("fn__none");
+            item.innerHTML = "";
+        });
     }, 200);
 };
 
@@ -634,10 +653,10 @@ export const addResize = (obj: Layout | Wnd) => {
                     if (previousNowSize < 8 || nextNowSize < 8) {
                         return;
                     }
-                    if (window.siyuan.layout.leftDock.layout.element.contains(previousElement) && previousNowSize < 188) {
+                    if (window.siyuan.layout.leftDock?.layout.element.contains(previousElement) && previousNowSize < 188) {
                         return;
                     }
-                    if (window.siyuan.layout.rightDock.layout.element.contains(nextElement) && nextNowSize < 188) {
+                    if (window.siyuan.layout.rightDock?.layout.element.contains(nextElement) && nextNowSize < 188) {
                         return;
                     }
                     previousElement.style[direction === "lr" ? "width" : "height"] = previousNowSize + "px";
@@ -665,10 +684,12 @@ export const addResize = (obj: Layout | Wnd) => {
                         nextElement.classList.add("fn__flex-1");
                     }
                     resizeTabs();
-                    window.siyuan.layout.leftDock.setSize();
-                    window.siyuan.layout.topDock.setSize();
-                    window.siyuan.layout.bottomDock.setSize();
-                    window.siyuan.layout.rightDock.setSize();
+                    if (!isWindow()) {
+                        window.siyuan.layout.leftDock.setSize();
+                        window.siyuan.layout.topDock.setSize();
+                        window.siyuan.layout.bottomDock.setSize();
+                        window.siyuan.layout.rightDock.setSize();
+                    }
                     if (range) {
                         focusByRange(range);
                     }
@@ -722,7 +743,7 @@ export const newCenterEmptyTab = () => {
                     newNotebook();
                 });
                 tab.panelElement.querySelector("#editorEmptyFile").addEventListener("click", () => {
-                    newFile(undefined, undefined, true);
+                    newFile(undefined, undefined, undefined, true);
                 });
             }
         }

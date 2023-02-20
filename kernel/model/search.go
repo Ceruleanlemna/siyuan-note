@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/siyuan-note/siyuan/kernel/task"
 	"path"
 	"regexp"
 	"sort"
@@ -49,8 +50,6 @@ type EmbedBlock struct {
 }
 
 func SearchEmbedBlock(embedBlockID, stmt string, excludeIDs []string, headingMode int, breadcrumb bool) (ret []*EmbedBlock) {
-	time.Sleep(util.FrontendQueueInterval)
-	WaitForWritingFiles()
 	return searchEmbedBlock(embedBlockID, stmt, excludeIDs, headingMode, breadcrumb)
 }
 
@@ -58,6 +57,11 @@ func searchEmbedBlock(embedBlockID, stmt string, excludeIDs []string, headingMod
 	sqlBlocks := sql.SelectBlocksRawStmtNoParse(stmt, Conf.Search.Limit)
 	var tmp []*sql.Block
 	for _, b := range sqlBlocks {
+		if "query_embed" == b.Type { // 嵌入块不再嵌入
+			// 嵌入块支持搜索 https://github.com/siyuan-note/siyuan/issues/7112
+			// 这里会导致上面的 limit 限制不准确，导致结果变少，暂时没有解决方案，只能靠用户自己调整 SQL，加上 type != 'query_embed' 的条件
+			continue
+		}
 		if !gulu.Str.Contains(b.ID, excludeIDs) {
 			tmp = append(tmp, b)
 		}
@@ -92,6 +96,9 @@ func searchEmbedBlock(embedBlockID, stmt string, excludeIDs []string, headingMod
 		})
 	}
 
+	// 嵌入块支持搜索 https://github.com/siyuan-note/siyuan/issues/7112
+	task.AppendTaskWithTimeout(task.DatabaseIndexEmbedBlock, 30*time.Second, updateEmbedBlockContent, embedBlockID, ret)
+
 	// 添加笔记本名称
 	var boxIDs []string
 	for _, embedBlock := range ret {
@@ -111,16 +118,33 @@ func searchEmbedBlock(embedBlockID, stmt string, excludeIDs []string, headingMod
 }
 
 func SearchRefBlock(id, rootID, keyword string, beforeLen int) (ret []*Block, newDoc bool) {
+	cachedTrees := map[string]*parse.Tree{}
+
 	if "" == keyword {
 		// 查询为空时默认的块引排序规则按最近使用优先 https://github.com/siyuan-note/siyuan/issues/3218
 		refs := sql.QueryRefsRecent()
 		for _, ref := range refs {
-			sqlBlock := sql.GetBlock(ref.DefBlockID)
-			block := fromSQLBlock(sqlBlock, "", beforeLen)
-			if nil == block {
+			tree := cachedTrees[ref.DefBlockRootID]
+			if nil == tree {
+				tree, _ = loadTreeByBlockID(ref.DefBlockRootID)
+			}
+			if nil == tree {
 				continue
 			}
-			block.RefText = sql.GetRefText(block.ID)
+			cachedTrees[ref.RootID] = tree
+
+			node := treenode.GetNodeInTree(tree, ref.DefBlockID)
+			if nil == node {
+				continue
+			}
+
+			sqlBlock := sql.BuildBlockFromNode(node, tree)
+			if nil == sqlBlock {
+				return
+			}
+
+			block := fromSQLBlock(sqlBlock, "", 0)
+			block.RefText = getNodeRefText(node)
 			block.RefText = maxContent(block.RefText, Conf.Editor.BlockRefDynamicAnchorTextMaxLen)
 			ret = append(ret, block)
 		}
@@ -132,18 +156,24 @@ func SearchRefBlock(id, rootID, keyword string, beforeLen int) (ret []*Block, ne
 
 	ret = fullTextSearchRefBlock(keyword, beforeLen)
 	tmp := ret[:0]
-	trees := map[string]*parse.Tree{}
 	for _, b := range ret {
-		hitFirstChildID := false
-		b.RefText = sql.GetRefText(b.ID)
-		b.RefText = maxContent(b.RefText, Conf.Editor.BlockRefDynamicAnchorTextMaxLen)
-		if b.IsContainerBlock() {
+		tree := cachedTrees[b.RootID]
+		if nil == tree {
+			tree, _ = loadTreeByBlockID(b.RootID)
+		}
+		if nil == tree {
+			continue
+		}
+		cachedTrees[b.RootID] = tree
+		b.RefText = getBlockRefText(b.ID, tree)
 
+		hitFirstChildID := false
+		if b.IsContainerBlock() {
 			// `((` 引用候选中排除当前块的父块 https://github.com/siyuan-note/siyuan/issues/4538
-			tree := trees[b.RootID]
+			tree := cachedTrees[b.RootID]
 			if nil == tree {
 				tree, _ = loadTreeByBlockID(b.RootID)
-				trees[b.RootID] = tree
+				cachedTrees[b.RootID] = tree
 			}
 			if nil != tree {
 				bNode := treenode.GetNodeInTree(tree, b.ID)
@@ -494,6 +524,7 @@ func buildTypeFilter(types map[string]bool) string {
 		s.SuperBlock = types["superBlock"]
 		s.Paragraph = types["paragraph"]
 		s.HTMLBlock = types["htmlBlock"]
+		s.EmbedBlock = types["embedBlock"]
 	} else {
 		s.Document = Conf.Search.Document
 		s.Heading = Conf.Search.Heading
@@ -506,12 +537,14 @@ func buildTypeFilter(types map[string]bool) string {
 		s.SuperBlock = Conf.Search.SuperBlock
 		s.Paragraph = Conf.Search.Paragraph
 		s.HTMLBlock = Conf.Search.HTMLBlock
+		s.EmbedBlock = Conf.Search.EmbedBlock
 	}
 	return s.TypeFilter()
 }
 
 func searchBySQL(stmt string, beforeLen int) (ret []*Block, matchedBlockCount, matchedRootCount int) {
 	stmt = gulu.Str.RemoveInvisible(stmt)
+	stmt = strings.TrimSpace(stmt)
 	blocks := sql.SelectBlocksRawStmt(stmt, Conf.Search.Limit)
 	ret = fromSQLBlocks(&blocks, "", beforeLen)
 	if 1 > len(ret) {
@@ -520,7 +553,11 @@ func searchBySQL(stmt string, beforeLen int) (ret []*Block, matchedBlockCount, m
 	}
 
 	stmt = strings.ToLower(stmt)
-	stmt = strings.ReplaceAll(stmt, "select * ", "select COUNT(id) AS `matches`, COUNT(DISTINCT(root_id)) AS `docs` ")
+	if strings.HasPrefix(stmt, "select a.* ") { // 多个搜索关键字匹配文档 https://github.com/siyuan-note/siyuan/issues/7350
+		stmt = strings.ReplaceAll(stmt, "select a.* ", "select COUNT(a.id) AS `matches`, COUNT(DISTINCT(a.root_id)) AS `docs` ")
+	} else {
+		stmt = strings.ReplaceAll(stmt, "select * ", "select COUNT(id) AS `matches`, COUNT(DISTINCT(root_id)) AS `docs` ")
+	}
 	result, _ := sql.Query(stmt)
 	if 1 > len(ret) {
 		return
@@ -534,7 +571,7 @@ func searchBySQL(stmt string, beforeLen int) (ret []*Block, matchedBlockCount, m
 func fullTextSearchRefBlock(keyword string, beforeLen int) (ret []*Block) {
 	keyword = gulu.Str.RemoveInvisible(keyword)
 
-	if util.IsIDPattern(keyword) {
+	if ast.IsNodeIDPattern(keyword) {
 		ret, _, _ = searchBySQL("SELECT * FROM `blocks` WHERE `id` = '"+keyword+"'", 36)
 		return
 	}
@@ -581,7 +618,7 @@ func fullTextSearchRefBlock(keyword string, beforeLen int) (ret []*Block) {
 
 func fullTextSearchByQuerySyntax(query, boxFilter, pathFilter, typeFilter, orderBy string, beforeLen int) (ret []*Block, matchedBlockCount, matchedRootCount int) {
 	query = gulu.Str.RemoveInvisible(query)
-	if util.IsIDPattern(query) {
+	if ast.IsNodeIDPattern(query) {
 		ret, matchedBlockCount, matchedRootCount = searchBySQL("SELECT * FROM `blocks` WHERE `id` = '"+query+"'", beforeLen)
 		return
 	}
@@ -590,7 +627,7 @@ func fullTextSearchByQuerySyntax(query, boxFilter, pathFilter, typeFilter, order
 
 func fullTextSearchByKeyword(query, boxFilter, pathFilter, typeFilter string, orderBy string, beforeLen int) (ret []*Block, matchedBlockCount, matchedRootCount int) {
 	query = gulu.Str.RemoveInvisible(query)
-	if util.IsIDPattern(query) {
+	if ast.IsNodeIDPattern(query) {
 		ret, matchedBlockCount, matchedRootCount = searchBySQL("SELECT * FROM `blocks` WHERE `id` = '"+query+"'", beforeLen)
 		return
 	}
@@ -660,7 +697,7 @@ func fullTextSearchByFTS(query, boxFilter, pathFilter, typeFilter, orderBy strin
 
 func fullTextSearchCount(query, boxFilter, pathFilter, typeFilter string) (matchedBlockCount, matchedRootCount int) {
 	query = gulu.Str.RemoveInvisible(query)
-	if util.IsIDPattern(query) {
+	if ast.IsNodeIDPattern(query) {
 		ret, _ := sql.Query("SELECT COUNT(id) AS `matches`, COUNT(DISTINCT(root_id)) AS `docs` FROM `blocks` WHERE `id` = '" + query + "'")
 		if 1 > len(ret) {
 			return
@@ -911,19 +948,19 @@ func markReplaceSpan(n *ast.Node, unlinks *[]*ast.Node, keywords []string, markS
 					c.TextMarkTextContent = string(c.Tokens)
 					if n.IsTextMarkType("a") {
 						c.TextMarkAHref, c.TextMarkATitle = n.TextMarkAHref, n.TextMarkATitle
-					} else if n.IsTextMarkType("block-ref") {
+					} else if treenode.IsBlockRef(n) {
 						c.TextMarkBlockRefID = n.TextMarkBlockRefID
 						c.TextMarkBlockRefSubtype = n.TextMarkBlockRefSubtype
-					} else if n.IsTextMarkType("file-annotation-ref") {
+					} else if treenode.IsFileAnnotationRef(n) {
 						c.TextMarkFileAnnotationRefID = n.TextMarkFileAnnotationRefID
 					}
 				} else if ast.NodeTextMark == c.Type {
 					if n.IsTextMarkType("a") {
 						c.TextMarkAHref, c.TextMarkATitle = n.TextMarkAHref, n.TextMarkATitle
-					} else if n.IsTextMarkType("block-ref") {
+					} else if treenode.IsBlockRef(n) {
 						c.TextMarkBlockRefID = n.TextMarkBlockRefID
 						c.TextMarkBlockRefSubtype = n.TextMarkBlockRefSubtype
-					} else if n.IsTextMarkType("file-annotation-ref") {
+					} else if treenode.IsFileAnnotationRef(n) {
 						c.TextMarkFileAnnotationRefID = n.TextMarkFileAnnotationRefID
 					}
 				}

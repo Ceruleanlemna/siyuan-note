@@ -168,6 +168,12 @@ func setFiletree(c *gin.Context) {
 		}
 	}
 
+	fileTree.DocCreateSavePath = strings.TrimSpace(fileTree.DocCreateSavePath)
+	for strings.HasSuffix(fileTree.DocCreateSavePath, "/") {
+		fileTree.DocCreateSavePath = strings.TrimSuffix(fileTree.DocCreateSavePath, "/")
+		fileTree.DocCreateSavePath = strings.TrimSpace(fileTree.DocCreateSavePath)
+	}
+
 	if 1 > fileTree.MaxOpenTabCount {
 		fileTree.MaxOpenTabCount = 8
 	}
@@ -271,6 +277,7 @@ func setAppearance(c *gin.Context) {
 
 	model.Conf.Appearance = appearance
 	model.Conf.Lang = appearance.Lang
+	util.Lang = model.Conf.Lang
 	model.Conf.Save()
 	model.InitAppearance()
 

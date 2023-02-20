@@ -10,35 +10,45 @@ import {getCurrentWindow} from "@electron/remote";
 /// #endif
 /// #endif
 import {MenuItem} from "../menus/Menu";
+import {Constants} from "../constants";
+import {resetFloatDockSize} from "./dock/util";
 
-export const initStatus = () => {
+export const initStatus = (isWindow = false) => {
     /// #if !MOBILE
     const allDocks = getAllDocks();
     let menuHTML = "";
     allDocks.forEach(item => {
         menuHTML += `<button class="b3-menu__item" data-type="${item.type}"><svg class="b3-menu__icon""><use xlink:href="#${item.icon}"></use></svg><span class="b3-menu__label">${window.siyuan.languages[item.hotkeyLangId]}</span><span class="b3-menu__accelerator">${updateHotkeyTip(window.siyuan.config.keymap.general[item.hotkeyLangId].custom)}</span></button>`;
     });
-    document.getElementById("status").innerHTML = `<div id="barDock" class="toolbar__item b3-tooltips b3-tooltips__e${window.siyuan.config.readonly ? " fn__none" : ""}" aria-label="${window.siyuan.config.uiLayout.hideDock ? window.siyuan.languages.showDock : window.siyuan.languages.hideDock}">
+    let barDockHTML = "";
+    if (!isWindow) {
+        barDockHTML = `<div id="barDock" class="toolbar__item b3-tooltips b3-tooltips__e${window.siyuan.config.readonly || isWindow ? " fn__none" : ""}" aria-label="${window.siyuan.config.uiLayout.hideDock ? window.siyuan.languages.showDock : window.siyuan.languages.hideDock}">
     <svg>
         <use xlink:href="#${window.siyuan.config.uiLayout.hideDock ? "iconDock" : "iconHideDock"}"></use>
     </svg>
     <div class="b3-menu fn__none" style="bottom: 32px;left: 5px">
         ${menuHTML}
     </div>
-</div>
+</div>`;
+    }
+    document.getElementById("status").innerHTML = `${barDockHTML}
 <div class="status__msg"></div>
 <div class="fn__flex-1"></div>
+<div class="status__backgroundtask fn__none"></div>
 <div class="status__counter"></div>
 <div id="statusHelp" class="toolbar__item b3-tooltips b3-tooltips__w" aria-label="${window.siyuan.languages.help}">
     <svg><use xlink:href="#iconHelp"></use></svg>
 </div>`;
-    const dockElement = document.getElementById("barDock");
-    dockElement.addEventListener("mousemove", () => {
-        dockElement.querySelector(".b3-menu").classList.remove("fn__none");
-    });
-    dockElement.addEventListener("mouseleave", () => {
-        dockElement.querySelector(".b3-menu").classList.add("fn__none");
-    });
+    if (!isWindow) {
+        // 由于点击切换时需隐藏菜单，因此不可使用 CSS
+        const dockElement = document.getElementById("barDock");
+        dockElement.addEventListener("mousemove", () => {
+            dockElement.querySelector(".b3-menu").classList.remove("fn__none");
+        });
+        dockElement.addEventListener("mouseleave", () => {
+            dockElement.querySelector(".b3-menu").classList.add("fn__none");
+        });
+    }
     document.querySelector("#status").addEventListener("click", (event) => {
         let target = event.target as HTMLElement;
         while (target.id !== "status") {
@@ -54,17 +64,33 @@ export const initStatus = () => {
                 }
                 document.querySelectorAll(".dock").forEach(item => {
                     if (dockIsShow) {
-                        if (item.querySelector(".dock__item")) {
-                            item.classList.add("fn__none");
-                        }
-                    } else {
-                        if (item.querySelector(".dock__item")) {
-                            item.classList.remove("fn__none");
-                        }
+                        item.classList.add("fn__none");
+                    } else if (item.querySelectorAll(".dock__item").length > 1) {
+                        item.classList.remove("fn__none");
                     }
                 });
                 resizeTabs();
                 target.querySelector(".b3-menu").classList.add("fn__none");
+                resetFloatDockSize();
+                event.stopPropagation();
+                break;
+            } else if (target.classList.contains("status__backgroundtask")) {
+                if (!window.siyuan.menus.menu.element.classList.contains("fn__none") &&
+                    window.siyuan.menus.menu.element.getAttribute("data-name") === "statusBackgroundTask") {
+                    window.siyuan.menus.menu.remove();
+                    return;
+                }
+                window.siyuan.menus.menu.remove();
+                window.siyuan.menus.menu.element.setAttribute("data-name", "statusBackgroundTask");
+                JSON.parse(target.getAttribute("data-tasks")).forEach((item: { action: string }) => {
+                    window.siyuan.menus.menu.append(new MenuItem({
+                        type: "readonly",
+                        iconHTML: Constants.ZWSP,
+                        label: item.action
+                    }).element);
+                });
+                const rect = target.getBoundingClientRect();
+                window.siyuan.menus.menu.popup({x: rect.right, y: rect.top}, true);
                 event.stopPropagation();
                 break;
             } else if (target.id === "statusHelp") {
@@ -117,7 +143,7 @@ export const initStatus = () => {
                     }
                 }).element);
                 const rect = target.getBoundingClientRect();
-                window.siyuan.menus.menu.popup({x: rect.right, y: rect.bottom, h: rect.height}, true);
+                window.siyuan.menus.menu.popup({x: rect.right, y: rect.top}, true);
                 event.stopPropagation();
                 break;
             } else if (target.classList.contains("b3-menu__item")) {
@@ -191,7 +217,13 @@ export const clearCounter = () => {
     document.querySelector("#status .status__counter").innerHTML = "";
 };
 
-export const renderStatusbarCounter = (stat: { runeCount: number, wordCount: number, linkCount: number, imageCount: number, refCount: number }) => {
+export const renderStatusbarCounter = (stat: {
+    runeCount: number,
+    wordCount: number,
+    linkCount: number,
+    imageCount: number,
+    refCount: number
+}) => {
     let html = `<span class="ft__on-surface">${window.siyuan.languages.runeCount}</span>&nbsp;${stat.runeCount}<span class="fn__space"></span>
 <span class="ft__on-surface">${window.siyuan.languages.wordCount}</span>&nbsp;${stat.wordCount}<span class="fn__space"></span>`;
     if (0 < stat.linkCount) {

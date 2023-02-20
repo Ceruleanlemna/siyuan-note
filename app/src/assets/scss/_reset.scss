@@ -55,7 +55,7 @@ body {
     -webkit-font-smoothing: auto;
 
     .toolbar {
-      padding: 0;
+      padding: 0 0 0 5px;
     }
 
     .fullscreen {
@@ -64,6 +64,26 @@ body {
         padding-left: 10px;
         padding-right: 108px;
       }
+    }
+  }
+
+  &.body--window {
+    .fullscreen {
+      & > .protyle-breadcrumb,
+      & > .block__icons {
+        height: 42px;
+      }
+    }
+
+    &.body--win32 .fullscreen {
+      & > .protyle-breadcrumb,
+      & > .block__icons {
+        padding-right: 126px;
+      }
+    }
+
+    &.body--blur .layout-tab-bar {
+      opacity: .38;
     }
   }
 }
